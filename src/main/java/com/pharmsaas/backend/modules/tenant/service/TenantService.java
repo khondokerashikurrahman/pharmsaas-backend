@@ -1,0 +1,299 @@
+
+        package com.pharmsaas.backend.modules.tenant.service;
+
+import com.pharmsaas.backend.modules.membership.entity.MembershipRole;
+import com.pharmsaas.backend.modules.membership.entity.TenantMembership;
+import com.pharmsaas.backend.modules.membership.repository.TenantMembershipRepository;
+import com.pharmsaas.backend.modules.tenant.dto.TenantRequest;
+import com.pharmsaas.backend.modules.tenant.dto.TenantResponse;
+import com.pharmsaas.backend.modules.tenant.entity.Tenant;
+import com.pharmsaas.backend.modules.tenant.repository.TenantRepository;
+import com.pharmsaas.backend.modules.user.entity.User;
+import com.pharmsaas.backend.modules.user.repository.UserRepository;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+
+@Service
+public class TenantService {
+
+    private static final Set<String> ALLOWED_STATUSES = Set.of(
+            "Pending",
+            "Approved",
+            "Active",
+            "Suspended",
+            "Rejected"
+    );
+
+    private final TenantRepository tenantRepository;
+    private final UserRepository userRepository;
+    private final TenantMembershipRepository membershipRepository;
+
+    public TenantService(
+            TenantRepository tenantRepository,
+            UserRepository userRepository,
+            TenantMembershipRepository membershipRepository) {
+
+        this.tenantRepository = tenantRepository;
+        this.userRepository = userRepository;
+        this.membershipRepository = membershipRepository;
+    }
+
+    // Create tenant and automatically assign its owner
+    @Transactional
+    public TenantResponse create(TenantRequest request, Long ownerUserId) {
+
+        if (ownerUserId == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.UNAUTHORIZED,
+                    "Please log in before creating a tenant."
+            );
+        }
+
+        User owner = userRepository.findById(ownerUserId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.UNAUTHORIZED,
+                        "Authenticated user was not found."
+                ));
+
+        String code = normalizeCode(request.tenantCode());
+
+        if (tenantRepository.existsByTenantCode(code)) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Tenant code already exists."
+            );
+        }
+
+        Tenant tenant = new Tenant();
+
+        applyRequest(tenant, request, true);
+        tenant.setTenantCode(code);
+
+        // Save tenant first to generate its ID
+        Tenant savedTenant = tenantRepository.save(tenant);
+
+        // Automatically make the logged-in user the tenant owner
+        TenantMembership membership = new TenantMembership();
+        membership.setTenant(savedTenant);
+        membership.setUser(owner);
+        membership.setRole(MembershipRole.TENANT_OWNER);
+        membership.setActive(true);
+
+        membershipRepository.save(membership);
+
+        // Both saves succeed together, or both roll back
+        return toResponse(savedTenant);
+    }
+
+    // Get all tenants
+    @Transactional(readOnly = true)
+    public List<TenantResponse> getAll() {
+        return tenantRepository.findAll()
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    // Get tenant by ID
+    @Transactional(readOnly = true)
+    public TenantResponse getById(Long id) {
+        return toResponse(findTenant(id));
+    }
+
+    // Get tenants awaiting Super Admin approval
+    @Transactional(readOnly = true)
+    public List<TenantResponse> getPending() {
+        return tenantRepository.findAll()
+                .stream()
+                .filter(tenant -> tenant.getStatus() != null
+                        && "Pending".equalsIgnoreCase(
+                                tenant.getStatus().trim()
+                        ))
+                .map(this::toResponse)
+                .toList();
+    }
+
+    // Approve a tenant and enable its system access
+    @Transactional
+    public TenantResponse approve(Long id) {
+        Tenant tenant = findTenant(id);
+
+        String status = tenant.getStatus();
+
+        // Repeating approval for an already active tenant is safe.
+        if (status != null && "Active".equalsIgnoreCase(status.trim())) {
+            return toResponse(tenant);
+        }
+
+        // Suspended and rejected tenants require a separate review.
+        if (status == null
+                || (!"Pending".equalsIgnoreCase(status.trim())
+                && !"Approved".equalsIgnoreCase(status.trim()))) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Only pending or approved tenants can be activated."
+            );
+        }
+
+        // Login and JWT filtering allow access only when status is Active.
+        tenant.setStatus("Active");
+        tenant.setRejectionReason(null);
+
+        return toResponse(tenantRepository.save(tenant));
+    }
+
+    // Reject a pending tenant and retain the reason.
+    @Transactional
+    public TenantResponse reject(Long id, String reason) {
+        if (reason == null || reason.isBlank()) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Rejection reason is required."
+            );
+        }
+
+        Tenant tenant = findTenant(id);
+        String status = tenant.getStatus();
+
+        if (status == null || !"Pending".equalsIgnoreCase(status.trim())) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Only pending tenants can be rejected."
+            );
+        }
+
+        tenant.setStatus("Rejected");
+        tenant.setRejectionReason(reason.trim());
+
+        return toResponse(tenantRepository.save(tenant));
+    }
+
+    // Update tenant
+    @Transactional
+    public TenantResponse update(Long id, TenantRequest request) {
+
+        Tenant tenant = findTenant(id);
+        String code = normalizeCode(request.tenantCode());
+
+        if (tenantRepository.existsByTenantCodeAndIdNot(code, id)) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Tenant code already exists."
+            );
+        }
+
+        applyRequest(tenant, request, false);
+        tenant.setTenantCode(code);
+
+        return toResponse(tenantRepository.save(tenant));
+    }
+
+    // Delete tenant only when no related records exist.
+    @Transactional
+    public void delete(Long id) {
+        Tenant tenant = findTenant(id);
+
+        try {
+            tenantRepository.delete(tenant);
+            tenantRepository.flush();
+        } catch (org.springframework.dao.DataIntegrityViolationException exception) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "This tenant cannot be permanently deleted because related users, memberships, or business records exist. Suspend the tenant instead.",
+                    exception
+            );
+        }
+    }
+
+    // Find tenant or return 404
+    private Tenant findTenant(Long id) {
+        if (id == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Tenant ID is required."
+            );
+        }
+
+        return tenantRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Tenant not found."
+                ));
+    }
+
+    // Apply request fields and validate status
+    private void applyRequest(
+            Tenant tenant,
+            TenantRequest request,
+            boolean creating) {
+
+        if (request.name() == null || request.name().isBlank()) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Tenant name is required."
+            );
+        }
+
+        tenant.setName(request.name().trim());
+        tenant.setOwnerName(request.ownerName());
+        tenant.setEmail(request.email());
+        tenant.setPhone(request.phone());
+        tenant.setAddress(request.address());
+
+        String status = request.status();
+
+        if (status == null || status.isBlank()) {
+            if (creating) {
+                status = "Pending";
+            } else {
+                return; // Keep the existing status on update
+            }
+        }
+
+        if (!ALLOWED_STATUSES.contains(status)) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Invalid tenant status. Allowed values: "
+                            + ALLOWED_STATUSES
+            );
+        }
+
+        tenant.setStatus(status);
+    }
+
+    // Normalize tenant code
+    private String normalizeCode(String code) {
+        if (code == null || code.isBlank()) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Tenant code is required."
+            );
+        }
+
+        return code.trim().toUpperCase(Locale.ROOT);
+    }
+
+    // Convert entity to response DTO
+    private TenantResponse toResponse(Tenant tenant) {
+        return new TenantResponse(
+                tenant.getId(),
+                tenant.getTenantCode(),
+                tenant.getName(),
+                tenant.getOwnerName(),
+                tenant.getEmail(),
+                tenant.getPhone(),
+                tenant.getAddress(),
+                tenant.getStatus(),
+                tenant.getRejectionReason(),
+                tenant.getCreatedAt(),
+                tenant.getUpdatedAt()
+        );
+    }
+}

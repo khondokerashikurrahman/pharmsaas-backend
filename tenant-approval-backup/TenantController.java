@@ -1,0 +1,97 @@
+
+        package com.pharmsaas.backend.modules.tenant.controller;
+
+import com.pharmsaas.backend.modules.tenant.dto.TenantRequest;
+import com.pharmsaas.backend.modules.tenant.dto.TenantResponse;
+import com.pharmsaas.backend.modules.tenant.service.TenantService;
+
+import jakarta.validation.Valid;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/tenants")
+public class TenantController {
+
+    private final TenantService tenantService;
+
+    public TenantController(TenantService tenantService) {
+        this.tenantService = tenantService;
+    }
+
+    // CREATE: logged-in user becomes the tenant owner
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public TenantResponse create(
+            @Valid @RequestBody TenantRequest request,
+            Authentication authentication) {
+
+        if (authentication == null
+                || authentication.getName() == null
+                || authentication.getName().isBlank()) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.UNAUTHORIZED,
+                    "Please login first."
+            );
+        }
+
+        Long ownerUserId;
+
+        try {
+            ownerUserId = Long.parseLong(authentication.getName());
+        } catch (NumberFormatException ex) {
+            throw new ResponseStatusException(
+                    HttpStatus.UNAUTHORIZED,
+                    "Invalid authenticated user."
+            );
+        }
+
+        return tenantService.create(request, ownerUserId);
+    }
+
+    // READ: all tenants
+    @GetMapping
+    public List<TenantResponse> getAll() {
+        return tenantService.getAll();
+    }
+
+    // READ: tenant by ID
+    @GetMapping("/{id}")
+    public TenantResponse getById(@PathVariable Long id) {
+        return tenantService.getById(id);
+    }
+
+    // Super Admin: list tenants awaiting approval
+    @GetMapping("/pending")
+    public List<TenantResponse> getPending() {
+        return tenantService.getPending();
+    }
+
+    // Super Admin: approve a pending tenant
+    @PostMapping("/{id}/approve")
+    public TenantResponse approve(@PathVariable Long id) {
+        return tenantService.approve(id);
+    }
+
+    // UPDATE: tenant by ID
+    @PutMapping("/{id}")
+    public TenantResponse update(
+            @PathVariable Long id,
+            @Valid @RequestBody TenantRequest request) {
+
+        return tenantService.update(id, request);
+    }
+
+    // DELETE: tenant by ID
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable Long id) {
+        tenantService.delete(id);
+    }
+}

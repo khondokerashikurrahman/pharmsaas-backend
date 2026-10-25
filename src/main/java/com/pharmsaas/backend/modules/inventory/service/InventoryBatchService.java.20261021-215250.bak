@@ -1,0 +1,121 @@
+package com.pharmsaas.backend.modules.inventory.service;
+
+import com.pharmsaas.backend.modules.inventory.dto.InventoryBatchResponse;
+import com.pharmsaas.backend.modules.inventory.entity.TenantInventoryBatch;
+import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryBatchRepository;
+import com.pharmsaas.backend.modules.membership.entity.MembershipRole;
+import com.pharmsaas.backend.modules.membership.repository.TenantMembershipRepository;
+import com.pharmsaas.backend.modules.tenant.repository.TenantRepository;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.time.LocalDate;
+import java.util.List;
+
+@Service
+public class InventoryBatchService {
+
+    private final TenantInventoryBatchRepository batchRepository;
+    private final TenantMembershipRepository membershipRepository;
+    private final TenantRepository tenantRepository;
+
+    public InventoryBatchService(
+            TenantInventoryBatchRepository batchRepository,
+            TenantMembershipRepository membershipRepository,
+            TenantRepository tenantRepository) {
+        this.batchRepository = batchRepository;
+        this.membershipRepository = membershipRepository;
+        this.tenantRepository = tenantRepository;
+    }
+
+    private void authorize(Long tenantId, Long userId) {
+        var tenant = tenantRepository.findById(tenantId)
+            .orElseThrow(() -> new ResponseStatusException(
+                HttpStatus.NOT_FOUND, "Tenant not found"));
+
+        if (tenant.getStatus() == null
+                || !"ACTIVE".equalsIgnoreCase(tenant.getStatus())) {
+            throw new ResponseStatusException(
+                HttpStatus.FORBIDDEN, "Tenant must be Active");
+        }
+
+        var membership = membershipRepository
+            .findByTenant_IdAndUser_IdAndActiveTrue(tenantId, userId)
+            .orElseThrow(() -> new ResponseStatusException(
+                HttpStatus.FORBIDDEN, "Active tenant membership required"));
+
+        MembershipRole role = membership.getRole();
+
+        if (role != MembershipRole.TENANT_OWNER
+                && role != MembershipRole.PHARMACY_ADMIN
+                && role != MembershipRole.MANAGER
+                && role != MembershipRole.STORE_KEEPER) {
+            throw new ResponseStatusException(
+                HttpStatus.FORBIDDEN, "You cannot view inventory batches");
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public List<InventoryBatchResponse> list(
+            Long tenantId, Long userId, Long itemId) {
+        authorize(tenantId, userId);
+
+        List<TenantInventoryBatch> batches = itemId == null
+            ? batchRepository.findAllByTenant_IdAndExpiryDateBetweenOrderByExpiryDateAsc(
+                tenantId, LocalDate.of(1, 1, 1), LocalDate.of(9999, 12, 31))
+            : batchRepository.findAllByTenant_IdAndInventoryItem_IdOrderByExpiryDateAsc(
+                tenantId, itemId);
+
+        return batches.stream().map(this::toResponse).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<InventoryBatchResponse> expired(Long tenantId, Long userId) {
+        authorize(tenantId, userId);
+        return batchRepository
+            .findAllByTenant_IdAndExpiryDateLessThanEqualOrderByExpiryDateAsc(
+                tenantId, LocalDate.now())
+            .stream()
+            .filter(b -> b.getQuantity() != null && b.getQuantity() > 0)
+            .map(this::toResponse)
+            .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<InventoryBatchResponse> expiring(
+            Long tenantId, Long userId, int days) {
+        authorize(tenantId, userId);
+
+        if (days < 1 || days > 365) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "Days must be between 1 and 365");
+        }
+
+        LocalDate today = LocalDate.now();
+
+        return batchRepository
+            .findAllByTenant_IdAndExpiryDateBetweenOrderByExpiryDateAsc(
+                tenantId, today, today.plusDays(days))
+            .stream()
+            .filter(b -> b.getQuantity() != null && b.getQuantity() > 0)
+            .map(this::toResponse)
+            .toList();
+    }
+
+    private InventoryBatchResponse toResponse(TenantInventoryBatch batch) {
+        return new InventoryBatchResponse(
+            batch.getId(),
+            batch.getTenant().getId(),
+            batch.getInventoryItem().getId(),
+            batch.getInventoryItem().getName(),
+            batch.getBatchNumber(),
+            batch.getManufactureDate(),
+            batch.getExpiryDate(),
+            batch.getQuantity(),
+            batch.getPurchasePrice(),
+            batch.getStatus()
+        );
+    }
+}

@@ -1,0 +1,808 @@
+﻿PROJECT ROOT: D:\Md.Ashikur Rahman\pharmsaas-backend
+
+========== FILE STRUCTURE ==========
+HELP.md
+pom.xml
+src\main\java\com\pharmsaas\backend\common\BaseEntity.java
+src\main\java\com\pharmsaas\backend\config\JpaConfig.java
+src\main\java\com\pharmsaas\backend\modules\tenant\controller\TenantController.java
+src\main\java\com\pharmsaas\backend\modules\tenant\dto\TenantRequest.java
+src\main\java\com\pharmsaas\backend\modules\tenant\dto\TenantResponse.java
+src\main\java\com\pharmsaas\backend\modules\tenant\entity\Tenant.java
+src\main\java\com\pharmsaas\backend\modules\tenant\repository\TenantRepository.java
+src\main\java\com\pharmsaas\backend\modules\tenant\service\TenantService.java
+src\main\java\com\pharmsaas\backend\PharmsaasBackendApplication.java
+src\main\java\com\pharmsaas\backend\security\HttpSecurity.java
+src\main\java\com\pharmsaas\backend\security\SecurityConfig.java
+src\main\java\com\pharmsaas\backend\security\SecurityFilterChain.java
+src\main\resources\application.properties
+src\test\java\com\pharmsaas\backend\PharmsaasBackendApplicationTests.java
+
+========== FILE CONTENTS ==========
+
+
+========================================
+FILE: HELP.md
+========================================
+# Getting Started
+
+### Reference Documentation
+For further reference, please consider the following sections:
+
+* [Official Apache Maven documentation](https://maven.apache.org/guides/index.html)
+* [Spring Boot Maven Plugin Reference Guide](https://docs.spring.io/spring-boot/4.1.1/maven-plugin)
+* [Create an OCI image](https://docs.spring.io/spring-boot/4.1.1/maven-plugin/build-image.html)
+* [Spring Web](https://docs.spring.io/spring-boot/4.1.1/reference/web/servlet.html)
+* [Spring Security](https://docs.spring.io/spring-boot/4.1.1/reference/web/spring-security.html)
+* [Spring Data JPA](https://docs.spring.io/spring-boot/4.1.1/reference/data/sql.html#data.sql.jpa-and-spring-data)
+* [Validation](https://docs.spring.io/spring-boot/4.1.1/reference/io/validation.html)
+* [Flyway Migration](https://docs.spring.io/spring-boot/4.1.1/how-to/data-initialization.html#howto.data-initialization.migration-tool.flyway)
+* [Spring Boot DevTools](https://docs.spring.io/spring-boot/4.1.1/reference/using/devtools.html)
+
+### Guides
+The following guides illustrate how to use some features concretely:
+
+* [Building a RESTful Web Service](https://spring.io/guides/gs/rest-service/)
+* [Serving Web Content with Spring MVC](https://spring.io/guides/gs/serving-web-content/)
+* [Building REST services with Spring](https://spring.io/guides/tutorials/rest/)
+* [Securing a Web Application](https://spring.io/guides/gs/securing-web/)
+* [Spring Boot and OAuth2](https://spring.io/guides/tutorials/spring-boot-oauth2/)
+* [Authenticating a User with LDAP](https://spring.io/guides/gs/authenticating-ldap/)
+* [Accessing Data with JPA](https://spring.io/guides/gs/accessing-data-jpa/)
+* [Validation](https://spring.io/guides/gs/validating-form-input/)
+
+### Maven Parent overrides
+
+Due to Maven's design, elements are inherited from the parent POM to the project POM.
+While most of the inheritance is fine, it also inherits unwanted elements like `<license>` and `<developers>` from the parent.
+To prevent this, the project POM contains empty overrides for these elements.
+If you manually switch to a different parent and actually want the inheritance, you need to remove those overrides.
+
+
+
+
+========================================
+FILE: pom.xml
+========================================
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>4.1.1</version>
+		<relativePath/> <!-- lookup parent from repository -->
+	</parent>
+	<groupId>com.pharmsaas</groupId>
+	<artifactId>pharmsaas-backend</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name/>
+	<description/>
+	<url/>
+	<licenses>
+		<license/>
+	</licenses>
+	<developers>
+		<developer/>
+	</developers>
+	<scm>
+		<connection/>
+		<developerConnection/>
+		<tag/>
+		<url/>
+	</scm>
+	<properties>
+		<java.version>17</java.version>
+	</properties>
+	<dependencies>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-jpa</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-flyway</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security</artifactId>
+		</dependency>
+
+
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>0.12.6</version>
+        </dependency>
+
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>0.12.6</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>0.12.6</version>
+            <scope>runtime</scope>
+        </dependency>
+
+
+        <dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-validation</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webmvc</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-database-postgresql</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-devtools</artifactId>
+			<scope>runtime</scope>
+			<optional>true</optional>
+		</dependency>
+		<dependency>
+			<groupId>org.postgresql</groupId>
+			<artifactId>postgresql</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.projectlombok</groupId>
+			<artifactId>lombok</artifactId>
+			<optional>true</optional>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-jpa-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-flyway-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-validation-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webmvc-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-compiler-plugin</artifactId>
+				<executions>
+					<execution>
+						<id>default-compile</id>
+						<phase>compile</phase>
+						<goals>
+							<goal>compile</goal>
+						</goals>
+						<configuration>
+							<annotationProcessorPaths>
+								<path>
+									<groupId>org.projectlombok</groupId>
+									<artifactId>lombok</artifactId>
+								</path>
+							</annotationProcessorPaths>
+						</configuration>
+					</execution>
+					<execution>
+						<id>default-testCompile</id>
+						<phase>test-compile</phase>
+						<goals>
+							<goal>testCompile</goal>
+						</goals>
+						<configuration>
+							<annotationProcessorPaths>
+								<path>
+									<groupId>org.projectlombok</groupId>
+									<artifactId>lombok</artifactId>
+								</path>
+							</annotationProcessorPaths>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+		</plugins>
+	</build>
+
+</project>
+
+
+
+========================================
+FILE: src\main\java\com\pharmsaas\backend\common\BaseEntity.java
+========================================
+package com.pharmsaas.backend.common;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.MappedSuperclass;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import lombok.Getter;
+import lombok.Setter;
+
+import java.time.OffsetDateTime;
+
+@Getter
+@Setter
+@MappedSuperclass
+public abstract class BaseEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "id", nullable = false, updatable = false)
+    private Long id;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private OffsetDateTime createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private OffsetDateTime updatedAt;
+
+    protected BaseEntity() {
+    }
+
+    @PrePersist
+    protected void onCreate() {
+        OffsetDateTime now = OffsetDateTime.now();
+
+        if (createdAt == null) {
+            createdAt = now;
+        }
+
+        updatedAt = now;
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = OffsetDateTime.now();
+    }
+
+}
+
+
+
+========================================
+FILE: src\main\java\com\pharmsaas\backend\config\JpaConfig.java
+========================================
+package com.pharmsaas.backend.config;
+
+
+
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
+
+@Configuration
+@EnableJpaAuditing
+public class JpaConfig {
+}
+
+
+
+========================================
+FILE: src\main\java\com\pharmsaas\backend\modules\tenant\controller\TenantController.java
+========================================
+
+        package com.pharmsaas.backend.modules.tenant.controller;
+
+import com.pharmsaas.backend.modules.tenant.dto.TenantRequest;
+import com.pharmsaas.backend.modules.tenant.dto.TenantResponse;
+import com.pharmsaas.backend.modules.tenant.service.TenantService;
+
+import jakarta.validation.Valid;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/tenants")
+public class TenantController {
+
+    private final TenantService tenantService;
+
+    public TenantController(TenantService tenantService) {
+        this.tenantService = tenantService;
+    }
+
+    // CREATE:
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public TenantResponse create(
+            @Valid @RequestBody TenantRequest request
+    ) {
+        return tenantService.create(request);
+    }
+
+    // READ: à¦¸à¦¬ Tenant à¦¦à§‡à¦–à¦¾à¦¨à§‹
+    @GetMapping
+    public List<TenantResponse> getAll() {
+        return tenantService.getAll();
+    }
+
+    // READ: ID
+    @GetMapping("/{id}")
+    public TenantResponse getById(
+            @PathVariable Long id
+    ) {
+        return tenantService.getById(id);
+    }
+
+    // UPDATE: ID
+    @PutMapping("/{id}")
+    public TenantResponse update(
+            @PathVariable Long id,
+            @Valid @RequestBody TenantRequest request
+    ) {
+        return tenantService.update(id, request);
+    }
+
+    // DELETE: ID
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(
+            @PathVariable Long id
+    ) {
+        tenantService.delete(id);
+    }
+}
+
+
+
+========================================
+FILE: src\main\java\com\pharmsaas\backend\modules\tenant\dto\TenantRequest.java
+========================================
+package com.pharmsaas.backend.modules.tenant.dto;
+
+
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+
+public record TenantRequest(
+
+        @NotBlank(message = "Tenant code is required")
+        @Size(max = 30)
+        String tenantCode,
+
+        @NotBlank(message = "Tenant name is required")
+        @Size(max = 150)
+        String name,
+
+        @Size(max = 150)
+        String ownerName,
+
+        @Email(message = "Invalid email address")
+        @Size(max = 255)
+        String email,
+
+        @Size(max = 30)
+        String phone,
+
+        String address,
+
+        String status
+
+) {}
+
+
+
+
+========================================
+FILE: src\main\java\com\pharmsaas\backend\modules\tenant\dto\TenantResponse.java
+========================================
+package com.pharmsaas.backend.modules.tenant.dto;
+
+import java.time.OffsetDateTime;
+
+
+public record TenantResponse(
+        Long id,
+        String tenantCode,
+        String name,
+        String ownerName,
+        String email,
+        String phone,
+        String address,
+        String status,
+        OffsetDateTime createdAt,
+        OffsetDateTime updatedAt
+) {}
+
+
+
+
+========================================
+FILE: src\main\java\com\pharmsaas\backend\modules\tenant\entity\Tenant.java
+========================================
+
+        package com.pharmsaas.backend.modules.tenant.entity;
+
+import com.pharmsaas.backend.common.BaseEntity;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Table;
+import lombok.Getter;
+import lombok.Setter;
+
+        @Setter
+        @Getter
+        @Entity
+@Table(name = "tenants")
+public class Tenant extends BaseEntity {
+
+    @Column(
+            name = "tenant_code",
+            nullable = false,
+            unique = true,
+            length = 30
+    )
+    private String tenantCode;
+
+    @Column(nullable = false, length = 150)
+    private String name;
+
+    @Column(name = "owner_name", length = 150)
+    private String ownerName;
+
+    @Column(length = 255)
+    private String email;
+
+    @Column(length = 30)
+    private String phone;
+
+    @Column(columnDefinition = "text")
+    private String address;
+
+    @Column(nullable = false, length = 20)
+    private String status = "Pending";
+
+    public Tenant() {
+    }
+
+        }
+
+
+
+========================================
+FILE: src\main\java\com\pharmsaas\backend\modules\tenant\repository\TenantRepository.java
+========================================
+package com.pharmsaas.backend.modules.tenant.repository;
+
+
+import com.pharmsaas.backend.modules.tenant.entity.Tenant;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface TenantRepository
+        extends JpaRepository<Tenant, Long> {
+
+    boolean existsByTenantCode(String tenantCode);
+
+    boolean existsByTenantCodeAndIdNot(
+            String tenantCode,
+            Long id
+    );
+}
+
+
+
+========================================
+FILE: src\main\java\com\pharmsaas\backend\modules\tenant\service\TenantService.java
+========================================
+
+        package com.pharmsaas.backend.modules.tenant.service;
+
+import com.pharmsaas.backend.modules.tenant.dto.TenantRequest;
+import com.pharmsaas.backend.modules.tenant.dto.TenantResponse;
+import com.pharmsaas.backend.modules.tenant.entity.Tenant;
+import com.pharmsaas.backend.modules.tenant.repository.TenantRepository;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.util.List;
+import java.util.Set;
+
+@Service
+public class TenantService {
+
+    private static final Set<String> ALLOWED_STATUSES = Set.of(
+            "Pending",
+            "Approved",
+            "Active",
+            "Suspended",
+            "Rejected"
+    );
+
+    private final TenantRepository tenantRepository;
+
+    public TenantService(TenantRepository tenantRepository) {
+        this.tenantRepository = tenantRepository;
+    }
+
+    @Transactional
+    public TenantResponse create(TenantRequest request) {
+
+        String code = normalizeCode(request.tenantCode());
+
+        if (tenantRepository.existsByTenantCode(code)) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Tenant code already exists"
+            );
+        }
+
+        Tenant tenant = new Tenant();
+
+        applyRequest(tenant, request, true);
+        tenant.setTenantCode(code);
+
+        return toResponse(tenantRepository.save(tenant));
+    }
+
+    @Transactional(readOnly = true)
+    public List<TenantResponse> getAll() {
+        return tenantRepository.findAll()
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public TenantResponse getById(Long id) {
+        return toResponse(findTenant(id));
+    }
+
+    @Transactional
+    public TenantResponse update(Long id, TenantRequest request) {
+
+        Tenant tenant = findTenant(id);
+        String code = normalizeCode(request.tenantCode());
+
+        if (tenantRepository.existsByTenantCodeAndIdNot(code, id)) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Tenant code already exists"
+            );
+        }
+
+        applyRequest(tenant, request, false);
+        tenant.setTenantCode(code);
+
+        return toResponse(tenantRepository.save(tenant));
+    }
+
+    @Transactional
+    public void delete(Long id) {
+        Tenant tenant = findTenant(id);
+        tenantRepository.delete(tenant);
+    }
+
+    private Tenant findTenant(Long id) {
+        return tenantRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Tenant not found"
+                ));
+    }
+
+    private void applyRequest(
+            Tenant tenant,
+            TenantRequest request,
+            boolean creating
+    ) {
+        tenant.setName(request.name().trim());
+        tenant.setOwnerName(request.ownerName());
+        tenant.setEmail(request.email());
+        tenant.setPhone(request.phone());
+        tenant.setAddress(request.address());
+
+        String status = request.status();
+
+        if (status == null || status.isBlank()) {
+            if (creating) {
+                status = "Pending";
+            } else {
+                return;
+            }
+        }
+
+        if (!ALLOWED_STATUSES.contains(status)) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Invalid tenant status"
+            );
+        }
+
+        tenant.setStatus(status);
+    }
+
+    private String normalizeCode(String code) {
+        if (code == null || code.isBlank()) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Tenant code is required"
+            );
+        }
+
+        return code.trim().toUpperCase();
+    }
+
+    private TenantResponse toResponse(Tenant tenant) {
+        return new TenantResponse(
+                tenant.getId(),
+                tenant.getTenantCode(),
+                tenant.getName(),
+                tenant.getOwnerName(),
+                tenant.getEmail(),
+                tenant.getPhone(),
+                tenant.getAddress(),
+                tenant.getStatus(),
+                tenant.getCreatedAt(),
+                tenant.getUpdatedAt()
+        );
+    }
+}
+
+
+
+========================================
+FILE: src\main\java\com\pharmsaas\backend\PharmsaasBackendApplication.java
+========================================
+package com.pharmsaas.backend;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class PharmsaasBackendApplication {
+
+	public static void main(String[] args) {
+		SpringApplication.run(PharmsaasBackendApplication.class, args);
+	}
+
+}
+
+
+
+========================================
+FILE: src\main\java\com\pharmsaas\backend\security\HttpSecurity.java
+========================================
+package com.pharmsaas.backend.security;
+
+public class HttpSecurity {
+
+}
+
+
+
+========================================
+FILE: src\main\java\com\pharmsaas\backend\security\SecurityConfig.java
+========================================
+package com.pharmsaas.backend.security;
+
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.web.SecurityFilterChain;
+
+@Configuration
+public class SecurityConfig {
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(
+            HttpSecurity http) throws Exception {
+
+        http
+                .csrf(csrf -> csrf.disable())
+                .authorizeHttpRequests(auth -> auth
+                        .anyRequest().permitAll()
+                )
+                .formLogin(form -> form.disable())
+                .httpBasic(basic -> basic.disable());
+
+        return http.build();
+    }
+}
+
+
+
+========================================
+FILE: src\main\java\com\pharmsaas\backend\security\SecurityFilterChain.java
+========================================
+package com.pharmsaas.backend.security;
+
+public class SecurityFilterChain {
+}
+
+
+
+========================================
+FILE: src\main\resources\application.properties
+========================================
+spring.application.name=pharmsaas-backend
+
+
+server.port=9090
+
+# ==============================
+# PostgreSQL
+# ==============================
+
+spring.datasource.url=jdbc:postgresql://localhost:5432/pharmsaas_db
+spring.datasource.username=postgres
+spring.datasource.password=root
+
+spring.datasource.driver-class-name=org.postgresql.Driver
+
+# ==============================
+# JPA / Hibernate
+# ==============================
+
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.format_sql=true
+
+
+# ==============================
+# JSP
+# ==============================
+
+spring.mvc.view.prefix=/WEB-INF/views/
+spring.mvc.view.suffix=.jsp
+
+
+
+
+========================================
+FILE: src\test\java\com\pharmsaas\backend\PharmsaasBackendApplicationTests.java
+========================================
+package com.pharmsaas.backend;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+
+@SpringBootTest
+class PharmsaasBackendApplicationTests {
+
+	@Test
+	void contextLoads() {
+	}
+
+}
+

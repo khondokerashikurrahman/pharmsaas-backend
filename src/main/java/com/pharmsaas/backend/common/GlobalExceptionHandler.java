@@ -1,0 +1,156 @@
+
+package com.pharmsaas.backend.common;
+
+import jakarta.validation.ConstraintViolationException;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.time.OffsetDateTime;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    private static final Logger log =
+            LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<Map<String, Object>> handleValidation(
+            MethodArgumentNotValidException exception) {
+
+        String message = exception.getBindingResult()
+                .getFieldErrors()
+                .stream()
+                .map(error -> error.getField() + ": "
+                        + error.getDefaultMessage())
+                .distinct()
+                .collect(Collectors.joining("; "));
+
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                "Validation Failed",
+                message.isBlank() ? "Invalid request data" : message
+        );
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<Map<String, Object>> handleConstraintViolation(
+            ConstraintViolationException exception) {
+
+        String message = exception.getConstraintViolations()
+                .stream()
+                .map(violation -> violation.getMessage())
+                .distinct()
+                .collect(Collectors.joining("; "));
+
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                "Validation Failed",
+                message.isBlank() ? "Invalid request parameters" : message
+        );
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Map<String, Object>> handleUnreadableRequest(
+            HttpMessageNotReadableException exception) {
+
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                "Bad Request",
+                "Request body is missing or contains invalid data"
+        );
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<Map<String, Object>> handleResponseStatus(
+            ResponseStatusException exception) {
+
+        HttpStatus status = HttpStatus.resolve(
+                exception.getStatusCode().value()
+        );
+
+        if (status == null) {
+            return buildResponse(
+                    exception.getStatusCode(),
+                    "Request Failed",
+                    exception.getReason() != null
+                            ? exception.getReason()
+                            : "The request could not be completed"
+            );
+        }
+
+        return buildResponse(
+                status,
+                status.getReasonPhrase(),
+                exception.getReason() != null
+                        ? exception.getReason()
+                        : status.getReasonPhrase()
+        );
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<Map<String, Object>> handleDataIntegrity(
+            DataIntegrityViolationException exception) {
+
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                "Conflict",
+                "This operation cannot be completed because other records depend on this data. If you are deleting a tenant, suspend it instead."
+        );
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, Object>> handleIllegalArgument(
+            IllegalArgumentException exception) {
+
+        String message = exception.getMessage();
+
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                "Bad Request",
+                message != null && !message.isBlank()
+                        ? message
+                        : "Invalid request"
+        );
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<Map<String, Object>> handleUnexpected(
+            Exception exception) {
+
+        log.error("Unexpected application error", exception);
+
+        return buildResponse(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "Internal Server Error",
+                "An unexpected server error occurred"
+        );
+    }
+
+    private ResponseEntity<Map<String, Object>> buildResponse(
+            org.springframework.http.HttpStatusCode status,
+            String error,
+            String message) {
+
+        Map<String, Object> body = new LinkedHashMap<>();
+
+        body.put("timestamp", OffsetDateTime.now());
+        body.put("status", status.value());
+        body.put("error", error);
+        body.put("message", message);
+
+        return ResponseEntity.status(status).body(body);
+    }
+}

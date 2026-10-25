@@ -1,0 +1,183 @@
+package com.pharmsaas.backend.modules.membership.controller;
+
+
+import com.pharmsaas.backend.modules.membership.dto.MembershipRequest;
+import com.pharmsaas.backend.modules.membership.dto.MembershipResponse;
+import com.pharmsaas.backend.modules.membership.entity.MembershipRole;
+import com.pharmsaas.backend.modules.membership.entity.TenantMembership;
+import com.pharmsaas.backend.modules.membership.service.TenantMembershipService;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.server.ResponseStatusException;
+
+import org.springframework.web.bind.annotation.*;
+
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/tenants/{tenantId}/memberships")
+public class TenantMembershipController {
+
+    private final TenantMembershipService membershipService;
+
+    public TenantMembershipController(
+            TenantMembershipService membershipService) {
+        this.membershipService = membershipService;
+    }
+
+    private Long getCurrentUserId(Authentication authentication) {
+        if (authentication == null
+                || authentication.getName() == null) {
+            throw new IllegalArgumentException(
+                    "Authenticated user is required.");
+        }
+
+        try {
+            return Long.parseLong(authentication.getName());
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException(
+                    "Invalid authenticated user ID.");
+        }
+    }
+
+    private void checkTenantAdmin(
+            Long tenantId,
+            Long currentUserId) {
+
+        boolean isOwner = membershipService.hasRole(
+                tenantId,
+                currentUserId,
+                MembershipRole.TENANT_OWNER);
+
+        boolean isAdmin = membershipService.hasRole(
+                tenantId,
+                currentUserId,
+                MembershipRole.PHARMACY_ADMIN);
+
+        if (!isOwner && !isAdmin) {
+            throw new org.springframework.web.server
+                    .ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "You are not authorized to manage this tenant.");
+        }
+    }
+
+    @PostMapping
+    public ResponseEntity<MembershipResponse> addMember(
+            @PathVariable Long tenantId,
+            @RequestBody MembershipRequest request,
+            Authentication authentication) {
+
+        Long currentUserId = getCurrentUserId(authentication);
+        checkTenantAdmin(tenantId, currentUserId);
+
+        if (request.getUserId() == null
+                || request.getRole() == null) {
+            throw new IllegalArgumentException(
+                    "User ID and role are required.");
+        }
+
+        if (request.getRole() == MembershipRole.TENANT_OWNER
+                || request.getRole() == MembershipRole.SUPER_ADMIN) {
+            throw new IllegalArgumentException(
+                    "This role cannot be assigned through this API.");
+        }
+
+        if (request.getRole() == MembershipRole.PHARMACY_ADMIN
+                && !membershipService.hasRole(
+                tenantId,
+                currentUserId,
+                MembershipRole.TENANT_OWNER)) {
+            throw new org.springframework.web.server
+                    .ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Only the tenant owner can assign PHARMACY_ADMIN.");
+        }
+
+        TenantMembership membership =
+                membershipService.addMembership(
+                        tenantId,
+                        request.getUserId(),
+                        request.getRole());
+
+        MembershipResponse response = toResponse(membership);
+
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(response);
+    }
+
+    @GetMapping
+    public ResponseEntity<List<MembershipResponse>> getMembers(
+            @PathVariable Long tenantId,
+            Authentication authentication) {
+
+        Long currentUserId = getCurrentUserId(authentication);
+        checkTenantAdmin(tenantId, currentUserId);
+
+        List<MembershipResponse> members =
+                membershipService.getTenantMembers(tenantId)
+                        .stream()
+                        .map(this::toResponse)
+                        .toList();
+
+        return ResponseEntity.ok(members);
+    }
+
+    private MembershipResponse toResponse(
+            TenantMembership membership) {
+
+        return new MembershipResponse(
+                membership.getId(),
+                membership.getTenant().getId(),
+                membership.getUser().getId(),
+                membership.getRole(),
+                membership.isActive());
+    }
+
+    @PutMapping("/{userId}/role")
+    public ResponseEntity<MembershipResponse> changeMemberRole(
+            @PathVariable Long tenantId,
+            @PathVariable Long userId,
+            @RequestBody MembershipRequest request,
+            Authentication authentication
+    ) {
+        Long currentUserId = getCurrentUserId(authentication);
+
+        checkTenantAdmin(tenantId, currentUserId);
+
+        if (request == null || request.getRole() == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "A role is required"
+            );
+        }
+
+        // Only the tenant owner can assign PHARMACY_ADMIN.
+        if (request.getRole() == MembershipRole.PHARMACY_ADMIN
+                && !membershipService.hasRole(
+                tenantId,
+                currentUserId,
+                MembershipRole.TENANT_OWNER
+        )) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Only the tenant owner can assign PHARMACY_ADMIN"
+            );
+        }
+
+        TenantMembership updated =
+                membershipService.changeMembershipRole(
+                        tenantId,
+                        userId,
+                        request.getRole()
+                );
+
+        return ResponseEntity.ok(toResponse(updated));
+    }
+}

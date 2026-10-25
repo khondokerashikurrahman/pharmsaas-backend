@@ -1,0 +1,228 @@
+package com.pharmsaas.backend.modules.store.service;
+
+import com.pharmsaas.backend.modules.membership.entity.MembershipRole;
+import com.pharmsaas.backend.modules.membership.repository.TenantMembershipRepository;
+import com.pharmsaas.backend.modules.store.dto.StoreRequest;
+import com.pharmsaas.backend.modules.store.dto.StoreResponse;
+import com.pharmsaas.backend.modules.store.entity.Store;
+import com.pharmsaas.backend.modules.store.repository.StoreRepository;
+import com.pharmsaas.backend.modules.tenant.entity.Tenant;
+import com.pharmsaas.backend.modules.tenant.repository.TenantRepository;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+
+@Service
+public class StoreService {
+
+    private static final Set<String> ALLOWED_STATUSES =
+            Set.of("Active", "Inactive");
+
+    private final StoreRepository storeRepository;
+    private final TenantRepository tenantRepository;
+    private final TenantMembershipRepository membershipRepository;
+
+    public StoreService(
+            StoreRepository storeRepository,
+            TenantRepository tenantRepository,
+            TenantMembershipRepository membershipRepository) {
+
+        this.storeRepository = storeRepository;
+        this.tenantRepository = tenantRepository;
+        this.membershipRepository = membershipRepository;
+    }
+
+    private void checkTenantAdmin(Long tenantId, Long userId) {
+
+        boolean isOwner =
+                membershipRepository
+                        .existsByTenant_IdAndUser_IdAndRoleAndActiveTrue(
+                                tenantId, userId, MembershipRole.TENANT_OWNER);
+
+        boolean isAdmin =
+                membershipRepository
+                        .existsByTenant_IdAndUser_IdAndRoleAndActiveTrue(
+                                tenantId, userId, MembershipRole.PHARMACY_ADMIN);
+
+        if (!isOwner && !isAdmin) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "You are not authorized to manage this tenant's stores."
+            );
+        }
+    }
+
+    private Tenant findTenant(Long tenantId) {
+        return tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Tenant not found."
+                ));
+    }
+
+    @Transactional
+    public StoreResponse create(
+            Long tenantId, Long userId, StoreRequest request) {
+
+        checkTenantAdmin(tenantId, userId);
+
+        Tenant tenant = findTenant(tenantId);
+        String code = normalizeCode(request.storeCode());
+
+        if (storeRepository.existsByTenant_IdAndStoreCode(tenantId, code)) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Store code already exists for this tenant."
+            );
+        }
+
+        Store store = new Store();
+        store.setTenant(tenant);
+        store.setStoreCode(code);
+
+        applyRequest(store, request, true);
+
+        return toResponse(storeRepository.save(store));
+    }
+
+    @Transactional(readOnly = true)
+    public List<StoreResponse> getAll(Long tenantId, Long userId) {
+
+        checkTenantAdmin(tenantId, userId);
+        findTenant(tenantId);
+
+        return storeRepository.findByTenant_Id(tenantId)
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public StoreResponse getById(
+            Long tenantId, Long storeId, Long userId) {
+
+        checkTenantAdmin(tenantId, userId);
+
+        Store store = findStore(tenantId, storeId);
+        return toResponse(store);
+    }
+
+    @Transactional
+    public StoreResponse update(
+            Long tenantId,
+            Long storeId,
+            Long userId,
+            StoreRequest request) {
+
+        checkTenantAdmin(tenantId, userId);
+
+        Store store = findStore(tenantId, storeId);
+        String code = normalizeCode(request.storeCode());
+
+        if (storeRepository.existsByTenant_IdAndStoreCodeAndIdNot(
+                tenantId, code, storeId)) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Store code already exists for this tenant."
+            );
+        }
+
+        store.setStoreCode(code);
+        applyRequest(store, request, false);
+
+        return toResponse(storeRepository.save(store));
+    }
+
+    @Transactional
+    public void delete(Long tenantId, Long storeId, Long userId) {
+
+        checkTenantAdmin(tenantId, userId);
+
+        Store store = findStore(tenantId, storeId);
+        storeRepository.delete(store);
+    }
+
+    private Store findStore(Long tenantId, Long storeId) {
+
+        return storeRepository.findByIdAndTenant_Id(storeId, tenantId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Store not found for this tenant."
+                ));
+    }
+
+    private void applyRequest(
+            Store store, StoreRequest request, boolean creating) {
+
+        if (request.name() == null || request.name().isBlank()) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Store name is required."
+            );
+        }
+
+        store.setName(request.name().trim());
+        store.setPhone(request.phone());
+        store.setEmail(request.email());
+        store.setAddress(request.address());
+        store.setCity(request.city());
+        store.setDistrict(request.district());
+
+        String status = request.status();
+
+        if (status == null || status.isBlank()) {
+            if (creating) {
+                status = "Active";
+            } else {
+                return;
+            }
+        }
+
+        if (!ALLOWED_STATUSES.contains(status)) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Invalid store status. Allowed values: "
+                            + ALLOWED_STATUSES
+            );
+        }
+
+        store.setStatus(status);
+    }
+
+    private String normalizeCode(String code) {
+
+        if (code == null || code.isBlank()) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Store code is required."
+            );
+        }
+
+        return code.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private StoreResponse toResponse(Store store) {
+
+        return new StoreResponse(
+                store.getId(),
+                store.getTenant().getId(),
+                store.getStoreCode(),
+                store.getName(),
+                store.getPhone(),
+                store.getEmail(),
+                store.getAddress(),
+                store.getCity(),
+                store.getDistrict(),
+                store.getStatus(),
+                store.getCreatedAt(),
+                store.getUpdatedAt()
+        );
+    }
+}

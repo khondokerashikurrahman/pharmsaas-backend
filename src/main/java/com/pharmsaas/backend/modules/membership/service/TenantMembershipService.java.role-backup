@@ -1,0 +1,201 @@
+
+        package com.pharmsaas.backend.modules.membership.service;
+
+import com.pharmsaas.backend.modules.membership.entity.MembershipRole;
+import com.pharmsaas.backend.modules.membership.entity.TenantMembership;
+import com.pharmsaas.backend.modules.membership.repository.TenantMembershipRepository;
+import com.pharmsaas.backend.modules.tenant.entity.Tenant;
+import com.pharmsaas.backend.modules.tenant.repository.TenantRepository;
+import com.pharmsaas.backend.modules.user.entity.User;
+import com.pharmsaas.backend.modules.user.repository.UserRepository;
+import org.springframework.http.HttpStatus;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+
+@Service
+public class TenantMembershipService {
+
+    private final TenantMembershipRepository membershipRepository;
+    private final TenantRepository tenantRepository;
+    private final UserRepository userRepository;
+
+    public TenantMembershipService(
+            TenantMembershipRepository membershipRepository,
+            TenantRepository tenantRepository,
+            UserRepository userRepository) {
+
+        this.membershipRepository = membershipRepository;
+        this.tenantRepository = tenantRepository;
+        this.userRepository = userRepository;
+    }
+
+    /**
+     * Add a user to a tenant with an allowed operational role.
+     * This method is not exposed through a public controller yet.
+     */
+    @Transactional
+    public TenantMembership addMembership(
+            Long tenantId,
+            Long userId,
+            MembershipRole role) {
+
+        if (tenantId == null || userId == null || role == null) {
+            throw new IllegalArgumentException(
+                    "Tenant ID, User ID and Role are required."
+            );
+        }
+
+        if (role == MembershipRole.SUPER_ADMIN
+                || role == MembershipRole.TENANT_OWNER) {
+            throw new IllegalArgumentException(
+                    "This role must be assigned through an authorized workflow."
+            );
+        }
+
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "Tenant not found with ID: " + tenantId
+                        ));
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "User not found with ID: " + userId
+                        ));
+
+        if (membershipRepository
+                .existsByTenant_IdAndUser_Id(tenantId, userId)) {
+            throw new IllegalStateException(
+                    "This user is already a member of this tenant."
+            );
+        }
+
+        TenantMembership membership = new TenantMembership();
+        membership.setTenant(tenant);
+        membership.setUser(user);
+        membership.setRole(role);
+        membership.setActive(true);
+
+        return membershipRepository.save(membership);
+    }
+
+    @Transactional(readOnly = true)
+    public List<TenantMembership> getTenantMembers(Long tenantId) {
+
+        if (!tenantRepository.existsById(tenantId)) {
+            throw new IllegalArgumentException(
+                    "Tenant not found with ID: " + tenantId
+            );
+        }
+
+        return membershipRepository
+                .findByTenant_IdAndActiveTrue(tenantId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<TenantMembership> getUserMemberships(Long userId) {
+
+        if (!userRepository.existsById(userId)) {
+            throw new IllegalArgumentException(
+                    "User not found with ID: " + userId
+            );
+        }
+
+        return membershipRepository
+                .findByUser_IdAndActiveTrue(userId);
+    }
+
+    @Transactional(readOnly = true)
+    public boolean hasRole(
+            Long tenantId,
+            Long userId,
+            MembershipRole role) {
+
+        return membershipRepository
+                .existsByTenant_IdAndUser_IdAndRoleAndActiveTrue(
+                        tenantId,
+                        userId,
+                        role
+                );
+    }
+
+    @Transactional
+    public TenantMembership changeMembershipStatus(
+            Long membershipId,
+            boolean active) {
+
+        TenantMembership membership =
+                membershipRepository.findById(membershipId)
+                        .orElseThrow(() ->
+                                new IllegalArgumentException(
+                                        "Membership not found with ID: "
+                                                + membershipId
+                                ));
+
+        membership.setActive(active);
+
+        return membershipRepository.save(membership);
+    }
+
+    @Transactional
+    public TenantMembership changeMembershipRole(
+            Long tenantId,
+            Long userId,
+            MembershipRole newRole
+    ) {
+        if (tenantId == null || userId == null || newRole == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Tenant ID, user ID and role are required"
+            );
+        }
+
+        if (newRole == MembershipRole.SUPER_ADMIN
+                || newRole == MembershipRole.TENANT_OWNER) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "This role cannot be assigned through membership management"
+            );
+        }
+
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Tenant not found"
+                ));
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "User not found"
+                ));
+
+        // Prevent cross-tenant membership changes.
+        if (user.getTenant() == null
+                || !tenantId.equals(user.getTenant().getId())) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "This user does not belong to the specified tenant"
+            );
+        }
+
+        TenantMembership membership =
+                membershipRepository
+                        .findByTenant_IdAndUser_IdAndActiveTrue(tenantId, userId)
+                        .orElseThrow(() -> new ResponseStatusException(
+                                HttpStatus.NOT_FOUND,
+                                "Active membership not found"
+                        ));
+
+        membership.setTenant(tenant);
+        membership.setRole(newRole);
+
+        return membershipRepository.save(membership);
+    }
+}

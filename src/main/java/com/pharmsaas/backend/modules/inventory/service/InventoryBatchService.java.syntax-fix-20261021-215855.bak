@@ -1,0 +1,229 @@
+package com.pharmsaas.backend.modules.inventory.service;
+
+import com.pharmsaas.backend.modules.inventory.dto.InventoryBatchCreateRequest;
+import com.pharmsaas.backend.modules.inventory.dto.InventoryBatchResponse;
+import com.pharmsaas.backend.modules.inventory.dto.InventoryBatchCreateRequest;
+import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryRepository;
+import com.pharmsaas.backend.modules.inventory.entity.TenantInventoryItem;
+import com.pharmsaas.backend.modules.inventory.entity.TenantInventoryBatch;
+import com.pharmsaas.backend.modules.inventory.entity.TenantInventoryItem;
+import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryBatchRepository;
+import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryRepository;
+import com.pharmsaas.backend.modules.membership.entity.MembershipRole;
+import com.pharmsaas.backend.modules.membership.repository.TenantMembershipRepository;
+import com.pharmsaas.backend.modules.tenant.repository.TenantRepository;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;\nimport java.math.BigDecimal;
+import java.util.List;
+
+@Service
+public class InventoryBatchService {
+
+    private final TenantInventoryBatchRepository batchRepository;
+    private final TenantInventoryRepository inventoryRepository;
+    private final TenantMembershipRepository membershipRepository;
+    private final TenantRepository tenantRepository;\n    private final TenantInventoryRepository inventoryRepository;
+
+    public InventoryBatchService(
+            TenantInventoryBatchRepository batchRepository,
+            TenantInventoryRepository inventoryRepository,
+            TenantMembershipRepository membershipRepository,
+            TenantRepository tenantRepository) {
+        this.batchRepository = batchRepository;
+        this.inventoryRepository = inventoryRepository;
+        this.membershipRepository = membershipRepository;
+        this.tenantRepository = tenantRepository;\n        this.inventoryRepository = inventoryRepository;
+    }
+
+    private void authorize(Long tenantId, Long userId, boolean writeAccess) {
+        var tenant = tenantRepository.findById(tenantId)
+            .orElseThrow(() -> new ResponseStatusException(
+                HttpStatus.NOT_FOUND, "Tenant not found"));
+
+        if (tenant.getStatus() == null
+                || !"ACTIVE".equalsIgnoreCase(tenant.getStatus())) {
+            throw new ResponseStatusException(
+                HttpStatus.FORBIDDEN, "Tenant must be Active");
+        }
+
+        var membership = membershipRepository
+            .findByTenant_IdAndUser_IdAndActiveTrue(tenantId, userId)
+            .orElseThrow(() -> new ResponseStatusException(
+                HttpStatus.FORBIDDEN, "Active tenant membership required"));
+
+        MembershipRole role = membership.getRole();
+
+        boolean canRead =
+            role == MembershipRole.TENANT_OWNER
+            || role == MembershipRole.PHARMACY_ADMIN
+            || role == MembershipRole.MANAGER
+            || role == MembershipRole.STORE_KEEPER;
+
+        boolean canWrite =
+            role == MembershipRole.TENANT_OWNER
+            || role == MembershipRole.PHARMACY_ADMIN
+            || role == MembershipRole.MANAGER
+            || role == MembershipRole.STORE_KEEPER;
+
+        if (!canRead || (writeAccess && !canWrite)) {
+            throw new ResponseStatusException(
+                HttpStatus.FORBIDDEN,
+                writeAccess ? "You cannot receive inventory stock"
+                            : "You cannot view inventory batches");
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public List<InventoryBatchResponse> list(
+            Long tenantId, Long userId, Long itemId) {
+        authorize(tenantId, userId, false);
+
+        List<TenantInventoryBatch> batches = itemId == null
+            ? batchRepository.findAllByTenant_IdAndExpiryDateBetweenOrderByExpiryDateAsc(
+                tenantId, LocalDate.of(1, 1, 1), LocalDate.of(9999, 12, 31))
+            : batchRepository.findAllByTenant_IdAndInventoryItem_IdOrderByExpiryDateAsc(
+                tenantId, itemId);
+
+        return batches.stream().map(this::toResponse).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<InventoryBatchResponse> expired(Long tenantId, Long userId) {
+        authorize(tenantId, userId, false);
+        return batchRepository
+            .findAllByTenant_IdAndExpiryDateLessThanEqualOrderByExpiryDateAsc(
+                tenantId, LocalDate.now())
+            .stream()
+            .filter(b -> b.getQuantity() != null && b.getQuantity() > 0)
+            .map(this::toResponse)
+            .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<InventoryBatchResponse> expiring(
+            Long tenantId, Long userId, int days) {
+        authorize(tenantId, userId, false);
+
+        if (days < 1 || days > 365) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "Days must be between 1 and 365");
+        }
+
+        LocalDate today = LocalDate.now();
+
+        return batchRepository
+            .findAllByTenant_IdAndExpiryDateBetweenOrderByExpiryDateAsc(
+                tenantId, today, today.plusDays(days))
+            .stream()
+            .filter(b -> b.getQuantity() != null && b.getQuantity() > 0)
+            .map(this::toResponse)
+            .toList();
+    }
+
+    @Transactional
+    public InventoryBatchResponse create(
+            Long tenantId, Long userId, InventoryBatchCreateRequest request) {
+        authorize(tenantId, userId, true);
+
+        if (request == null || request.inventoryItemId() == null) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "Medicine is required");
+        }
+
+        String batchNumber = request.batchNumber() == null
+            ? "" : request.batchNumber().trim();
+
+        if (batchNumber.isBlank()) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "Batch number is required");
+        }
+
+        if (request.quantity() == null || request.quantity() <= 0) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "Quantity must be greater than zero");
+        }
+
+        if (request.purchasePrice() == null
+                || request.purchasePrice().compareTo(BigDecimal.ZERO) <= 0
+                || request.sellingPrice() == null
+                || request.sellingPrice().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "Purchase and selling prices must be greater than zero");
+        }
+
+        if (request.expiryDate() == null
+                || !request.expiryDate().isAfter(LocalDate.now())) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "Expiry date must be in the future");
+        }
+
+        if (request.manufactureDate() != null
+                && request.expiryDate().isBefore(request.manufactureDate())) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "Expiry date must not be before manufacture date");
+        }
+
+        TenantInventoryItem item = inventoryRepository
+            .findForUpdate(request.inventoryItemId(), tenantId)
+            .orElseThrow(() -> new ResponseStatusException(
+                HttpStatus.NOT_FOUND, "Medicine not found for this tenant"));
+
+        if (!"ACTIVE".equalsIgnoreCase(item.getStatus())) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "Inactive medicine cannot receive stock");
+        }
+
+        if (batchRepository.existsByTenant_IdAndInventoryItem_IdAndBatchNumberIgnoreCase(
+                tenantId, item.getId(), batchNumber)) {
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT, "This batch number already exists for the medicine");
+        }
+
+        TenantInventoryBatch batch = new TenantInventoryBatch();
+        batch.setTenant(item.getTenant());
+        batch.setInventoryItem(item);
+        batch.setBatchNumber(batchNumber);
+        batch.setManufactureDate(request.manufactureDate());
+        batch.setExpiryDate(request.expiryDate());
+        batch.setQuantity(request.quantity());
+        batch.setPurchasePrice(request.purchasePrice());
+        batch.setStatus(
+            request.expiryDate().isBefore(LocalDate.now().plusDays(91))
+                ? "NEAR_EXPIRY" : "ACTIVE"
+        );
+
+        item.setStockQuantity(
+            Math.addExact(
+                item.getStockQuantity() == null ? 0 : item.getStockQuantity(),
+                request.quantity()
+            )
+        );
+        item.setPurchasePrice(request.purchasePrice());
+        item.setSellingPrice(request.sellingPrice());
+
+        batchRepository.save(batch);
+        inventoryRepository.save(item);
+
+        return toResponse(batch);
+    }
+
+    private InventoryBatchResponse toResponse(TenantInventoryBatch batch) {
+        return new InventoryBatchResponse(
+            batch.getId(),
+            batch.getTenant().getId(),
+            batch.getInventoryItem().getId(),
+            batch.getInventoryItem().getName(),
+            batch.getBatchNumber(),
+            batch.getManufactureDate(),
+            batch.getExpiryDate(),
+            batch.getQuantity(),
+            batch.getPurchasePrice(),
+            batch.getStatus()
+        );
+    }
+}

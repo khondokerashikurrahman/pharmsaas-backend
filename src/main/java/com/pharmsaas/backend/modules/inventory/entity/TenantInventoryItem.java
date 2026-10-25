@@ -1,0 +1,100 @@
+package com.pharmsaas.backend.modules.inventory.entity;
+
+import com.pharmsaas.backend.common.BaseEntity;
+import com.pharmsaas.backend.modules.tenant.entity.Tenant;
+import jakarta.persistence.*;
+import java.math.BigDecimal;
+
+@Entity
+@Table(
+    name = "tenant_inventory_items",
+    uniqueConstraints = @UniqueConstraint(
+        name = "uk_inventory_tenant_sku",
+        columnNames = {"tenant_id", "sku"}
+    ),
+    indexes = @Index(name = "idx_inventory_tenant", columnList = "tenant_id")
+)
+public class TenantInventoryItem extends BaseEntity {
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "tenant_id", nullable = false)
+    private Tenant tenant;
+
+    @Column(nullable = false, length = 150)
+    private String name;
+
+    @Column(length = 150)
+    private String genericName;
+
+    @Column(length = 150)
+    private String brandName;
+
+    @Column(length = 80)
+    private String strength;
+
+    @Column(length = 80)
+    private String dosageForm;
+
+    @Column(nullable = false, length = 60)
+    private String sku;
+
+    @Column(length = 100)
+    private String barcode;
+
+    @Column(nullable = false, precision = 12, scale = 2)
+    private BigDecimal purchasePrice = BigDecimal.ZERO;
+
+    @Column(nullable = false, precision = 12, scale = 2)
+    private BigDecimal sellingPrice = BigDecimal.ZERO;
+
+    @Column(nullable = false)
+    private Integer stockQuantity = 0;
+
+    @Column(nullable = false)
+    private Integer reorderLevel = 0;
+
+    @Column(nullable = false, length = 20)
+    private String status = "ACTIVE";
+
+    public TenantInventoryItem() {
+    }
+
+    public Tenant getTenant() { return tenant; }
+    public void setTenant(Tenant tenant) { this.tenant = tenant; }
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public String getGenericName() { return genericName; }
+    public void setGenericName(String genericName) { this.genericName = genericName; }
+
+    public String getBrandName() { return brandName; }
+    public void setBrandName(String brandName) { this.brandName = brandName; }
+
+    public String getStrength() { return strength; }
+    public void setStrength(String strength) { this.strength = strength; }
+
+    public String getDosageForm() { return dosageForm; }
+    public void setDosageForm(String dosageForm) { this.dosageForm = dosageForm; }
+
+    public String getSku() { return sku; }
+    public void setSku(String sku) { this.sku = sku; }
+
+    public String getBarcode() { return barcode; }
+    public void setBarcode(String barcode) { this.barcode = barcode; }
+
+    public BigDecimal getPurchasePrice() { return purchasePrice; }
+    public void setPurchasePrice(BigDecimal purchasePrice) { this.purchasePrice = purchasePrice; }
+
+    public BigDecimal getSellingPrice() { return sellingPrice; }
+    public void setSellingPrice(BigDecimal sellingPrice) { this.sellingPrice = sellingPrice; }
+
+    public Integer getStockQuantity() { return stockQuantity; }
+    public void setStockQuantity(Integer stockQuantity) { this.stockQuantity = stockQuantity; }
+
+    public Integer getReorderLevel() { return reorderLevel; }
+    public void setReorderLevel(Integer reorderLevel) { this.reorderLevel = reorderLevel; }
+
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+}
