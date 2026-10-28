@@ -8,6 +8,9 @@ import com.pharmsaas.backend.modules.purchaseorder.entity.PurchaseOrder;
 import com.pharmsaas.backend.modules.purchaseorder.entity.PurchaseOrderItem;
 import com.pharmsaas.backend.modules.purchaseorder.entity.PurchaseOrderStatus;
 import com.pharmsaas.backend.modules.purchaseorder.repository.PurchaseOrderRepository;
+import com.pharmsaas.backend.modules.supplier.entity.Supplier;
+import com.pharmsaas.backend.modules.supplier.repository.SupplierRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.pharmsaas.backend.modules.tenant.repository.TenantRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -26,7 +29,21 @@ public class PurchaseOrderService {
     private final PurchaseOrderRepository orderRepository;
     private final TenantRepository tenantRepository;
     private final TenantMembershipRepository membershipRepository;
+    private final SupplierRepository supplierRepository;
 
+    @Autowired
+    public PurchaseOrderService(
+            PurchaseOrderRepository orderRepository,
+            TenantRepository tenantRepository,
+            TenantMembershipRepository membershipRepository,
+            SupplierRepository supplierRepository) {
+        this.orderRepository = orderRepository;
+        this.tenantRepository = tenantRepository;
+        this.membershipRepository = membershipRepository;
+        this.supplierRepository = supplierRepository;
+    }
+
+    // Backwards-compatible constructor for existing unit tests.
     public PurchaseOrderService(
             PurchaseOrderRepository orderRepository,
             TenantRepository tenantRepository,
@@ -34,6 +51,7 @@ public class PurchaseOrderService {
         this.orderRepository = orderRepository;
         this.tenantRepository = tenantRepository;
         this.membershipRepository = membershipRepository;
+        this.supplierRepository = null;
     }
 
     private void authorize(Long tenantId, Long userId, boolean write) {
@@ -113,6 +131,45 @@ public class PurchaseOrderService {
 
     private void badRequest(String message) {
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+    }
+
+    private void linkSupplier(PurchaseOrder order, PurchaseOrderRequest request) {
+        if (supplierRepository == null) {
+            linkSupplier(order, request);
+            return;
+        }
+
+        Long tenantId = order.getTenant().getId();
+        Supplier selected = null;
+
+        if (request.supplierId() != null) {
+            selected = supplierRepository
+                .findByIdAndTenant_Id(request.supplierId(), tenantId)
+                .orElseThrow(() -> new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Selected supplier does not belong to this tenant"
+                ));
+
+            if (!"Active".equalsIgnoreCase(selected.getStatus())) {
+                throw new ResponseStatusException(
+                    HttpStatus.CONFLICT, "Selected supplier is inactive"
+                );
+            }
+        } else {
+            // Older clients send supplierName only. Link it when an exact
+            // active tenant supplier exists; retain legacy text otherwise.
+            selected = supplierRepository
+                .findByTenant_IdAndNameIgnoreCase(
+                    tenantId, request.supplierName().trim()
+                )
+                .filter(supplier -> "Active".equalsIgnoreCase(supplier.getStatus()))
+                .orElse(null);
+        }
+
+        order.setSupplier(selected);
+        order.setSupplierName(
+            selected == null ? request.supplierName().trim() : selected.getName()
+        );
     }
 
     private void fillOrder(PurchaseOrder order, PurchaseOrderRequest request) {
@@ -216,7 +273,8 @@ public class PurchaseOrderService {
             order.getApprovedAt(),
             order.getCreatedAt(),
             order.getUpdatedAt(),
-            items
+            items,
+            order.getSupplier() == null ? null : order.getSupplier().getId()
         );
     }
 

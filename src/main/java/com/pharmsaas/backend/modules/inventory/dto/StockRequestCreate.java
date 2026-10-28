@@ -4,5 +4,6 @@ public record StockRequestCreate(
     Long inventoryItemId,
     String movementType,
     Integer quantity,
-    String reason
+    String reason,
+    Long batchId
 ) {}

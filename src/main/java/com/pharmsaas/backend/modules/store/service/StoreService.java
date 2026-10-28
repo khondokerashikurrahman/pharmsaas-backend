@@ -106,7 +106,10 @@ public class StoreService {
 
         boolean isReadOnlyOperator =
                 role == MembershipRole.MANAGER
-                || role == MembershipRole.STORE_KEEPER;
+                || role == MembershipRole.STORE_KEEPER
+                || role == MembershipRole.PHARMACIST
+                || role == MembershipRole.STAFF
+                || role == MembershipRole.CASHIER;
 
         if (isTenantAdmin) {
             return tenant;
@@ -122,6 +125,33 @@ public class StoreService {
                         ? "Only the Tenant Owner or Pharmacy Admin can modify stores."
                         : "Your role cannot access store management."
         );
+    }
+
+    /**
+     * Creates the default store for a tenant when it has no stores.
+     * Existing stores are preserved.
+     */
+    @Transactional
+    public Store ensureDefaultStore(Tenant tenant) {
+        if (tenant == null || tenant.getId() == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "A saved tenant is required to create a default store."
+            );
+        }
+
+        List<Store> existingStores = storeRepository.findByTenant_Id(tenant.getId());
+        if (!existingStores.isEmpty()) {
+            return existingStores.get(0);
+        }
+
+        Store store = new Store();
+        store.setTenant(tenant);
+        store.setStoreCode("MAIN");
+        store.setName("Main Store");
+        store.setStatus("Active");
+
+        return storeRepository.save(store);
     }
 
     @Transactional
@@ -163,19 +193,24 @@ public class StoreService {
         return toResponse(storeRepository.save(store));
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public List<StoreResponse> getAll(
             Long tenantId,
             Long userId) {
 
-        requireTenantAccess(
+        Tenant tenant = requireTenantAccess(
                 tenantId,
                 userId,
                 false
         );
 
-        return storeRepository.findByTenant_Id(tenantId)
-                .stream()
+        List<Store> stores = storeRepository.findByTenant_Id(tenantId);
+
+        if (stores.isEmpty()) {
+            stores = List.of(ensureDefaultStore(tenant));
+        }
+
+        return stores.stream()
                 .map(this::toResponse)
                 .toList();
     }

@@ -155,7 +155,43 @@ public class SecurityConfig {
                                 "/api/tenants/*/sales/**"
                         ).authenticated()
 
-                        // Tenant administration: Super Admin only
+                        // Tenant supplier APIs: service validates tenant membership and role
+                        .requestMatchers(
+                                "/api/tenants/*/suppliers",
+                                "/api/tenants/*/suppliers/**"
+                        ).authenticated()
+
+                        // Tenant GRN APIs: service validates tenant membership and role
+                        .requestMatchers(
+                                "/api/tenants/*/grn",
+                                "/api/tenants/*/grn/**"
+                        ).authenticated()
+
+                        // Tenant product categories: service validates tenant membership and write roles
+                        .requestMatchers(
+                                "/api/tenants/*/product-categories",
+                                "/api/tenants/*/product-categories/**"
+                        ).authenticated()
+
+                                                // Tenant generic names: service validates membership and write roles
+                        .requestMatchers(
+                                "/api/tenants/*/product-generics",
+                                "/api/tenants/*/product-generics/**"
+                        ).authenticated()
+
+                        // Tenant company API: service validates membership and write roles
+                        .requestMatchers(
+                                "/api/tenants/*/companies",
+                                "/api/tenants/*/companies/**"
+                        ).authenticated()
+
+                        // Tenant dosage-form API: service validates membership and write roles
+                        .requestMatchers(
+                                "/api/tenants/*/dosage-forms",
+                                "/api/tenants/*/dosage-forms/**"
+                        ).authenticated()
+
+// Tenant administration: Super Admin only
                         .requestMatchers(
                                 "/api/tenants",
                                 "/api/tenants/**"

@@ -12,8 +12,23 @@ public record PurchaseOrderRequest(
     BigDecimal discount,
     BigDecimal tax,
     String notes,
-    List<ItemRequest> items
+    List<ItemRequest> items,
+    Long supplierId
 ) {
+    public PurchaseOrderRequest(
+        String supplierName,
+        Long branchId,
+        LocalDate orderDate,
+        LocalDate expectedDeliveryDate,
+        BigDecimal discount,
+        BigDecimal tax,
+        String notes,
+        List<ItemRequest> items
+    ) {
+        this(supplierName, branchId, orderDate, expectedDeliveryDate,
+            discount, tax, notes, items, null);
+    }
+
     public record ItemRequest(
         Long inventoryItemId,
         String medicineName,

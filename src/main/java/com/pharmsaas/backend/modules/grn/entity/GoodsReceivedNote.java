@@ -2,6 +2,8 @@ package com.pharmsaas.backend.modules.grn.entity;
 
 import com.pharmsaas.backend.common.BaseEntity;
 import com.pharmsaas.backend.modules.tenant.entity.Tenant;
+import com.pharmsaas.backend.modules.supplier.entity.Supplier;
+import com.pharmsaas.backend.modules.purchaseorder.entity.PurchaseOrder;
 import jakarta.persistence.*;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -27,6 +29,14 @@ public class GoodsReceivedNote extends BaseEntity {
 
     @Column(name = "supplier_name", nullable = false, length = 150)
     private String supplierName;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "supplier_id")
+    private Supplier supplier;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "purchase_order_id")
+    private PurchaseOrder purchaseOrder;
 
     @Column(name = "purchase_order_number", nullable = false, length = 60)
     private String purchaseOrderNumber;
@@ -61,6 +71,12 @@ public class GoodsReceivedNote extends BaseEntity {
 
     public String getSupplierName() { return supplierName; }
     public void setSupplierName(String supplierName) { this.supplierName = supplierName; }
+
+    public Supplier getSupplier() { return supplier; }
+    public void setSupplier(Supplier supplier) { this.supplier = supplier; }
+
+    public PurchaseOrder getPurchaseOrder() { return purchaseOrder; }
+    public void setPurchaseOrder(PurchaseOrder purchaseOrder) { this.purchaseOrder = purchaseOrder; }
 
     public String getPurchaseOrderNumber() { return purchaseOrderNumber; }
     public void setPurchaseOrderNumber(String purchaseOrderNumber) { this.purchaseOrderNumber = purchaseOrderNumber; }

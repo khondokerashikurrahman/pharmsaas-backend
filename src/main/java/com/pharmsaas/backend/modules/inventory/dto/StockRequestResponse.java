@@ -16,5 +16,7 @@ public record StockRequestResponse(
     String status,
     String decisionNote,
     OffsetDateTime createdAt,
-    OffsetDateTime decidedAt
+    OffsetDateTime decidedAt,
+    Long batchId,
+    String batchNumber
 ) {}

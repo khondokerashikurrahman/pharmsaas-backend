@@ -10,6 +10,7 @@ import com.pharmsaas.backend.modules.tenant.entity.Tenant;
 import com.pharmsaas.backend.modules.tenant.repository.TenantRepository;
 import com.pharmsaas.backend.modules.user.entity.User;
 import com.pharmsaas.backend.modules.user.repository.UserRepository;
+import com.pharmsaas.backend.modules.store.service.StoreService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -34,15 +35,18 @@ public class TenantService {
     private final TenantRepository tenantRepository;
     private final UserRepository userRepository;
     private final TenantMembershipRepository membershipRepository;
+    private final StoreService storeService;
 
     public TenantService(
             TenantRepository tenantRepository,
             UserRepository userRepository,
-            TenantMembershipRepository membershipRepository) {
+            TenantMembershipRepository membershipRepository,
+            StoreService storeService) {
 
         this.tenantRepository = tenantRepository;
         this.userRepository = userRepository;
         this.membershipRepository = membershipRepository;
+        this.storeService = storeService;
     }
 
     // Create tenant and automatically assign its owner
@@ -78,6 +82,8 @@ public class TenantService {
 
         // Save tenant first to generate its ID
         Tenant savedTenant = tenantRepository.save(tenant);
+
+        storeService.ensureDefaultStore(savedTenant);
 
         // Automatically make the logged-in user the tenant owner
         TenantMembership membership = new TenantMembership();

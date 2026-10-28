@@ -2,8 +2,11 @@ package com.pharmsaas.backend.modules.sale.service;
 
 import com.pharmsaas.backend.modules.inventory.entity.TenantInventoryBatch;
 import com.pharmsaas.backend.modules.inventory.entity.TenantInventoryItem;
+import com.pharmsaas.backend.modules.inventory.entity.StoreInventoryStock;
 import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryBatchRepository;
 import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryRepository;
+import com.pharmsaas.backend.modules.inventory.repository.StoreInventoryStockRepository;
+import com.pharmsaas.backend.modules.inventory.service.InventoryMovementService;
 import com.pharmsaas.backend.modules.membership.repository.TenantMembershipRepository;
 import com.pharmsaas.backend.modules.sale.dto.SaleCreateRequest;
 import com.pharmsaas.backend.modules.sale.dto.SaleResponse;
@@ -13,6 +16,8 @@ import com.pharmsaas.backend.modules.sale.repository.SaleItemRepository;
 import com.pharmsaas.backend.modules.sale.repository.SaleRepository;
 import com.pharmsaas.backend.modules.tenant.entity.Tenant;
 import com.pharmsaas.backend.modules.tenant.repository.TenantRepository;
+import com.pharmsaas.backend.modules.store.entity.Store;
+import com.pharmsaas.backend.modules.store.repository.StoreRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -38,23 +43,32 @@ public class SaleService {
     private final SaleItemRepository saleItemRepository;
     private final TenantInventoryRepository inventoryRepository;
     private final TenantInventoryBatchRepository batchRepository;
+    private final StoreInventoryStockRepository storeStockRepository;
     private final TenantRepository tenantRepository;
     private final TenantMembershipRepository membershipRepository;
+    private final StoreRepository storeRepository;
+    private final InventoryMovementService movementService;
 
     public SaleService(
         SaleRepository saleRepository,
         SaleItemRepository saleItemRepository,
         TenantInventoryRepository inventoryRepository,
         TenantInventoryBatchRepository batchRepository,
+        StoreInventoryStockRepository storeStockRepository,
         TenantRepository tenantRepository,
-        TenantMembershipRepository membershipRepository
+        TenantMembershipRepository membershipRepository,
+        StoreRepository storeRepository,
+        InventoryMovementService movementService
     ) {
         this.saleRepository = saleRepository;
         this.saleItemRepository = saleItemRepository;
         this.inventoryRepository = inventoryRepository;
         this.batchRepository = batchRepository;
+        this.storeStockRepository = storeStockRepository;
         this.tenantRepository = tenantRepository;
         this.membershipRepository = membershipRepository;
+        this.storeRepository = storeRepository;
+        this.movementService = movementService;
     }
 
     @Transactional
@@ -76,9 +90,9 @@ public class SaleService {
         String role = membership.getRole().name();
         if (!Set.of(
             "TENANT_OWNER", "PHARMACY_ADMIN", "MANAGER",
-            "STORE_KEEPER", "PHARMACIST", "STAFF", "CASHIER"
+            "PHARMACIST", "CASHIER"
         ).contains(role)) {
-            throw error(HttpStatus.FORBIDDEN, "You cannot create sales");
+            throw error(HttpStatus.FORBIDDEN, "Your role cannot create sales");
         }
 
         if (request == null || request.items() == null || request.items().isEmpty()) {
@@ -113,6 +127,24 @@ public class SaleService {
             throw error(HttpStatus.BAD_REQUEST, "Discount percentage cannot exceed 100");
         }
 
+        if (request.storeId() == null || request.storeId() <= 0) {
+            throw error(
+                HttpStatus.BAD_REQUEST,
+                "A store must be selected for every POS sale"
+            );
+        }
+
+        Store selectedStore = storeRepository
+            .findByIdAndTenant_Id(request.storeId(), tenantId)
+            .orElseThrow(() -> error(
+                HttpStatus.NOT_FOUND, "Store not found in this tenant"
+            ));
+
+        if (selectedStore.getStatus() == null ||
+            !selectedStore.getStatus().equalsIgnoreCase("ACTIVE")) {
+            throw error(HttpStatus.BAD_REQUEST, "Selected store is not active");
+        }
+
         Set<Long> usedBatches = new HashSet<>();
         List<SaleItem> saleItems = new ArrayList<>();
         BigDecimal subtotal = ZERO;
@@ -145,9 +177,27 @@ public class SaleService {
                 throw error(HttpStatus.BAD_REQUEST, "Batch does not belong to this product");
             }
 
-            if (batch.getExpiryDate() != null &&
-                !batch.getExpiryDate().isAfter(LocalDate.now())) {
-                throw error(HttpStatus.BAD_REQUEST, "Expired medicine cannot be sold");
+            if (item.getStatus() == null ||
+                !item.getStatus().equalsIgnoreCase("ACTIVE")) {
+                throw error(HttpStatus.CONFLICT, "Inactive medicine cannot be sold");
+            }
+
+            String batchStatus = batch.getStatus() == null
+                ? "" : batch.getStatus().trim().toUpperCase(Locale.ROOT);
+
+            if (!Set.of("ACTIVE", "NEAR_EXPIRY").contains(batchStatus)) {
+                throw error(HttpStatus.CONFLICT, "Inactive batch cannot be sold");
+            }
+
+            if (batch.getExpiryDate() == null) {
+                throw error(
+                    HttpStatus.CONFLICT,
+                    "Batch expiry date is missing; this batch cannot be sold"
+                );
+            }
+
+            if (!batch.getExpiryDate().isAfter(LocalDate.now())) {
+                throw error(HttpStatus.CONFLICT, "Expired medicine cannot be sold");
             }
 
             if (batch.getQuantity() == null ||
@@ -158,6 +208,26 @@ public class SaleService {
             if (item.getStockQuantity() == null ||
                 item.getStockQuantity() < line.quantity()) {
                 throw error(HttpStatus.CONFLICT, "Insufficient inventory stock");
+            }
+
+            StoreInventoryStock storeStock = null;
+            if (selectedStore != null) {
+                storeStock = storeStockRepository
+                    .findForUpdate(tenantId, selectedStore.getId(), batch.getId())
+                    .orElseThrow(() -> error(
+                        HttpStatus.CONFLICT,
+                        "No stock is allocated to the selected store for batch "
+                            + batch.getId()
+                    ));
+
+                if (storeStock.getQuantity() == null ||
+                    storeStock.getQuantity() < line.quantity()) {
+                    throw error(
+                        HttpStatus.CONFLICT,
+                        "Insufficient stock in selected store for batch "
+                            + batch.getId()
+                    );
+                }
             }
 
             BigDecimal unitPrice = money(item.getSellingPrice());
@@ -184,6 +254,11 @@ public class SaleService {
 
             batchRepository.save(batch);
             inventoryRepository.save(item);
+
+            if (storeStock != null) {
+                storeStock.setQuantity(storeStock.getQuantity() - line.quantity());
+                storeStockRepository.save(storeStock);
+            }
         }
 
         BigDecimal discount = "percentage".equals(discountType)
@@ -218,6 +293,8 @@ public class SaleService {
 
         Sale sale = new Sale();
         sale.setTenant(tenant);
+        sale.setCreatedBy(membership.getUser());
+        sale.setStore(selectedStore);
         sale.setInvoiceNumber("INV-" + UUID.randomUUID()
             .toString().replace("-", "").substring(0, 12).toUpperCase(Locale.ROOT));
         sale.setCustomerName(
@@ -241,6 +318,37 @@ public class SaleService {
             saleItem.setSale(sale);
         }
         saleItemRepository.saveAll(saleItems);
+
+        // Sale and ledger entries participate in the same database transaction.
+        for (SaleItem soldLine : saleItems) {
+            TenantInventoryBatch soldBatch = soldLine.getBatch();
+
+            Integer quantityAfter = soldBatch.getQuantity();
+            if (selectedStore != null) {
+                quantityAfter = storeStockRepository
+                    .findForUpdate(tenantId, selectedStore.getId(), soldBatch.getId())
+                    .map(row -> row.getQuantity())
+                    .orElseThrow(() -> error(
+                        HttpStatus.CONFLICT,
+                        "Store stock allocation not found while recording sale"
+                    ));
+            }
+
+            movementService.record(
+                tenant,
+                soldLine.getInventoryItem(),
+                soldBatch,
+                "SALE",
+                -soldLine.getQuantity(),
+                quantityAfter,
+                "SALE",
+                sale.getId(),
+                sale.getInvoiceNumber(),
+                "POS sale",
+                userId,
+                selectedStore
+            );
+        }
 
         return toResponse(sale, saleItems);
     }
@@ -306,6 +414,11 @@ public class SaleService {
             sale.getChangeAmount(),
             sale.getStatus(),
             sale.getCreatedAt(),
+            sale.getCreatedBy() != null ? sale.getCreatedBy().getId() : null,
+            sale.getCreatedBy() != null ? sale.getCreatedBy().getFullName() : null,
+            sale.getStore() != null ? sale.getStore().getId() : null,
+            sale.getStore() != null ? sale.getStore().getName() : null,
+            sale.getStore() != null ? sale.getStore().getStoreCode() : null,
             lines
         );
     }

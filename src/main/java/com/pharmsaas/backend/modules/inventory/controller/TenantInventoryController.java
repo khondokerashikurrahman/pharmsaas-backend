@@ -10,7 +10,10 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/tenants/{tenantId}/inventory/medicines")
+@RequestMapping({
+    "/api/tenants/{tenantId}/inventory/medicines",
+    "/api/tenants/{tenantId}/inventory/products"
+})
 public class TenantInventoryController {
 
     private final TenantInventoryService inventoryService;

@@ -1,0 +1,642 @@
+package com.pharmsaas.backend.modules.branchtransfer.service;
+
+import com.pharmsaas.backend.modules.branchtransfer.dto.BranchTransferActionRequest;
+import com.pharmsaas.backend.modules.branchtransfer.dto.BranchTransferCreateRequest;
+import com.pharmsaas.backend.modules.branchtransfer.dto.BranchTransferResponse;
+import com.pharmsaas.backend.modules.branchtransfer.entity.BranchTransfer;
+import com.pharmsaas.backend.modules.branchtransfer.entity.BranchTransferItem;
+import com.pharmsaas.backend.modules.branchtransfer.repository.BranchTransferRepository;
+import com.pharmsaas.backend.modules.inventory.entity.InventoryMovement;
+import com.pharmsaas.backend.modules.inventory.entity.StoreInventoryStock;
+import com.pharmsaas.backend.modules.inventory.entity.TenantInventoryBatch;
+import com.pharmsaas.backend.modules.inventory.entity.TenantInventoryItem;
+import com.pharmsaas.backend.modules.inventory.repository.StoreInventoryStockRepository;
+import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryBatchRepository;
+import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryRepository;
+import com.pharmsaas.backend.modules.inventory.service.InventoryMovementService;
+import com.pharmsaas.backend.modules.membership.entity.MembershipRole;
+import com.pharmsaas.backend.modules.membership.repository.TenantMembershipRepository;
+import com.pharmsaas.backend.modules.store.entity.Store;
+import com.pharmsaas.backend.modules.store.repository.StoreRepository;
+import com.pharmsaas.backend.modules.tenant.entity.Tenant;
+import com.pharmsaas.backend.modules.tenant.repository.TenantRepository;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.util.*;
+import java.util.stream.Collectors;
+
+@Service
+public class BranchTransferService {
+
+    private static final Set<MembershipRole> READ_ROLES = Set.of(
+        MembershipRole.TENANT_OWNER,
+        MembershipRole.PHARMACY_ADMIN,
+        MembershipRole.MANAGER,
+        MembershipRole.STORE_KEEPER,
+        MembershipRole.PHARMACIST,
+        MembershipRole.STAFF,
+        MembershipRole.CASHIER
+    );
+
+    private static final Set<MembershipRole> REQUEST_ROLES = Set.of(
+        MembershipRole.TENANT_OWNER,
+        MembershipRole.PHARMACY_ADMIN,
+        MembershipRole.MANAGER,
+        MembershipRole.STORE_KEEPER
+    );
+
+    private static final Set<MembershipRole> APPROVER_ROLES = Set.of(
+        MembershipRole.TENANT_OWNER,
+        MembershipRole.PHARMACY_ADMIN,
+        MembershipRole.MANAGER
+    );
+
+    private static final Set<MembershipRole> HANDLER_ROLES = Set.of(
+        MembershipRole.TENANT_OWNER,
+        MembershipRole.PHARMACY_ADMIN,
+        MembershipRole.MANAGER,
+        MembershipRole.STORE_KEEPER
+    );
+
+    private final BranchTransferRepository transferRepository;
+    private final TenantRepository tenantRepository;
+    private final TenantMembershipRepository membershipRepository;
+    private final StoreRepository storeRepository;
+    private final StoreInventoryStockRepository storeStockRepository;
+    private final TenantInventoryRepository inventoryRepository;
+    private final TenantInventoryBatchRepository batchRepository;
+    private final InventoryMovementService movementService;
+
+    public BranchTransferService(
+            BranchTransferRepository transferRepository,
+            TenantRepository tenantRepository,
+            TenantMembershipRepository membershipRepository,
+            StoreRepository storeRepository,
+            StoreInventoryStockRepository storeStockRepository,
+            TenantInventoryRepository inventoryRepository,
+            TenantInventoryBatchRepository batchRepository,
+            InventoryMovementService movementService) {
+        this.transferRepository = transferRepository;
+        this.tenantRepository = tenantRepository;
+        this.membershipRepository = membershipRepository;
+        this.storeRepository = storeRepository;
+        this.storeStockRepository = storeStockRepository;
+        this.inventoryRepository = inventoryRepository;
+        this.batchRepository = batchRepository;
+        this.movementService = movementService;
+    }
+
+    private Tenant authorize(
+            Long tenantId,
+            Long userId,
+            Set<MembershipRole> allowedRoles) {
+
+        Tenant tenant = tenantRepository.findById(tenantId)
+            .orElseThrow(() -> error(HttpStatus.NOT_FOUND, "Tenant not found"));
+
+        if (tenant.getStatus() == null
+                || !"ACTIVE".equalsIgnoreCase(tenant.getStatus())) {
+            throw error(HttpStatus.FORBIDDEN, "Tenant must be Active");
+        }
+
+        var membership = membershipRepository
+            .findByTenant_IdAndUser_IdAndActiveTrue(tenantId, userId)
+            .orElseThrow(() -> error(
+                HttpStatus.FORBIDDEN, "Active tenant membership required"));
+
+        if (!allowedRoles.contains(membership.getRole())) {
+            throw error(
+                HttpStatus.FORBIDDEN,
+                "Your role cannot perform this transfer operation");
+        }
+
+        return tenant;
+    }
+
+    private Store requireActiveStore(Long tenantId, Long storeId) {
+        if (storeId == null || storeId <= 0) {
+            throw error(HttpStatus.BAD_REQUEST, "Valid store ID is required");
+        }
+
+        Store store = storeRepository.findByIdAndTenant_Id(storeId, tenantId)
+            .orElseThrow(() -> error(
+                HttpStatus.NOT_FOUND, "Store not found for this tenant"));
+
+        if (store.getStatus() == null
+                || !"ACTIVE".equalsIgnoreCase(store.getStatus())) {
+            throw error(HttpStatus.CONFLICT, "Store must be Active");
+        }
+
+        return store;
+    }
+
+    @Transactional(readOnly = true)
+    public List<BranchTransferResponse> list(Long tenantId, Long userId) {
+        authorize(tenantId, userId, READ_ROLES);
+        return transferRepository.findAllByTenant_IdOrderByCreatedAtDesc(tenantId)
+            .stream().map(this::toResponse).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public BranchTransferResponse get(
+            Long tenantId, Long transferId, Long userId) {
+        authorize(tenantId, userId, READ_ROLES);
+        return toResponse(findTransfer(tenantId, transferId));
+    }
+
+    @Transactional
+    public BranchTransferResponse create(
+            Long tenantId,
+            Long userId,
+            BranchTransferCreateRequest request) {
+
+        Tenant tenant = authorize(tenantId, userId, REQUEST_ROLES);
+
+        if (request == null
+                || request.sourceStoreId() == null
+                || request.destinationStoreId() == null
+                || request.sourceStoreId().equals(request.destinationStoreId())
+                || request.items() == null
+                || request.items().isEmpty()
+                || request.items().size() > 100
+                || request.reason() == null
+                || request.reason().isBlank()
+                || request.reason().trim().length() > 500) {
+            throw error(
+                HttpStatus.BAD_REQUEST,
+                "Choose different source and destination stores, at least one item, and a reason (max 500 characters)");
+        }
+
+        Store source = requireActiveStore(tenantId, request.sourceStoreId());
+        Store destination = requireActiveStore(tenantId, request.destinationStoreId());
+
+        Set<Long> usedBatchIds = new HashSet<>();
+        List<BranchTransferCreateRequest.Item> lines = request.items().stream()
+            .sorted(Comparator.comparing(
+                BranchTransferCreateRequest.Item::batchId,
+                Comparator.nullsLast(Comparator.naturalOrder())))
+            .toList();
+
+        for (var line : lines) {
+            if (line == null || line.batchId() == null
+                    || line.quantity() == null || line.quantity() <= 0) {
+                throw error(
+                    HttpStatus.BAD_REQUEST,
+                    "Every line requires a batch and positive quantity");
+            }
+
+            if (!usedBatchIds.add(line.batchId())) {
+                throw error(
+                    HttpStatus.BAD_REQUEST,
+                    "A batch can only appear once in a transfer");
+            }
+
+            TenantInventoryBatch batch = batchRepository
+                .findByIdAndTenant_Id(line.batchId(), tenantId)
+                .orElseThrow(() -> error(
+                    HttpStatus.NOT_FOUND, "Batch not found for this tenant"));
+
+            if (batch.getExpiryDate() == null
+                    || !batch.getExpiryDate().isAfter(LocalDate.now())) {
+                throw error(
+                    HttpStatus.CONFLICT,
+                    "Expired or undated batches cannot be transferred");
+            }
+
+            if (!"ACTIVE".equalsIgnoreCase(batch.getStatus())
+                    && !"NEAR_EXPIRY".equalsIgnoreCase(batch.getStatus())) {
+                throw error(
+                    HttpStatus.CONFLICT,
+                    "Only active or near-expiry batches can be transferred");
+            }
+
+            StoreInventoryStock sourceStock = storeStockRepository
+                .findForUpdate(tenantId, source.getId(), batch.getId())
+                .orElseThrow(() -> error(
+                    HttpStatus.CONFLICT,
+                    "The source store has no allocation for batch " + batch.getBatchNumber()));
+
+            if (sourceStock.getQuantity() == null
+                    || line.quantity() > sourceStock.getQuantity()) {
+                throw error(
+                    HttpStatus.CONFLICT,
+                    "Insufficient source-store stock for batch " + batch.getBatchNumber());
+            }
+        }
+
+        BranchTransfer transfer = new BranchTransfer();
+        transfer.setTenant(tenant);
+        transfer.setSourceStore(source);
+        transfer.setDestinationStore(destination);
+        transfer.setTransferNumber(
+            "TRF-" + UUID.randomUUID().toString()
+                .replace("-", "").substring(0, 12).toUpperCase(Locale.ROOT));
+        transfer.setStatus("PENDING");
+        transfer.setReason(request.reason().trim());
+        transfer.setRequestedBy(userId);
+
+        for (var line : lines) {
+            TenantInventoryBatch batch = batchRepository
+                .findByIdAndTenant_Id(line.batchId(), tenantId)
+                .orElseThrow(() -> error(
+                    HttpStatus.NOT_FOUND, "Batch not found for this tenant"));
+
+            BranchTransferItem item = new BranchTransferItem();
+            item.setInventoryItem(batch.getInventoryItem());
+            item.setBatch(batch);
+            item.setQuantity(line.quantity());
+            item.setReceivedQuantity(0);
+            transfer.addItem(item);
+        }
+
+        return toResponse(transferRepository.save(transfer));
+    }
+
+    @Transactional
+    public BranchTransferResponse approve(
+            Long tenantId,
+            Long transferId,
+            Long userId,
+            BranchTransferActionRequest action) {
+
+        authorize(tenantId, userId, APPROVER_ROLES);
+        BranchTransfer transfer = findTransferForUpdate(tenantId, transferId);
+
+        requireStatus(transfer, "PENDING");
+
+        if (Objects.equals(transfer.getRequestedBy(), userId)) {
+            throw error(
+                HttpStatus.FORBIDDEN, "You cannot approve your own transfer request");
+        }
+
+        transfer.setStatus("APPROVED");
+        transfer.setApprovedBy(userId);
+        transfer.setApprovedAt(OffsetDateTime.now());
+        transfer.setActionNote(cleanNote(action == null ? null : action.note()));
+
+        return toResponse(transferRepository.save(transfer));
+    }
+
+    @Transactional
+    public BranchTransferResponse reject(
+            Long tenantId,
+            Long transferId,
+            Long userId,
+            BranchTransferActionRequest action) {
+
+        authorize(tenantId, userId, APPROVER_ROLES);
+        BranchTransfer transfer = findTransferForUpdate(tenantId, transferId);
+
+        if (!Set.of("PENDING", "APPROVED").contains(transfer.getStatus())) {
+            throw error(
+                HttpStatus.CONFLICT,
+                "Only pending or approved transfers can be rejected");
+        }
+
+        if (Objects.equals(transfer.getRequestedBy(), userId)) {
+            throw error(
+                HttpStatus.FORBIDDEN, "You cannot reject your own transfer request");
+        }
+
+        transfer.setStatus("REJECTED");
+        transfer.setRejectedBy(userId);
+        transfer.setRejectedAt(OffsetDateTime.now());
+        transfer.setActionNote(cleanNote(action == null ? null : action.note()));
+
+        return toResponse(transferRepository.save(transfer));
+    }
+
+    @Transactional
+    public BranchTransferResponse dispatch(
+            Long tenantId, Long transferId, Long userId) {
+
+        authorize(tenantId, userId, HANDLER_ROLES);
+        BranchTransfer transfer = findTransferForUpdate(tenantId, transferId);
+        requireStatus(transfer, "APPROVED");
+
+        requireActiveStore(tenantId, transfer.getSourceStore().getId());
+
+        List<BranchTransferItem> items = transfer.getItems().stream()
+            .sorted(Comparator
+                .comparing((BranchTransferItem i) -> i.getInventoryItem().getId())
+                .thenComparing(i -> i.getBatch().getId()))
+            .toList();
+
+        for (BranchTransferItem line : items) {
+            Long itemId = line.getInventoryItem().getId();
+            Long batchId = line.getBatch().getId();
+
+            TenantInventoryItem inventoryItem = inventoryRepository
+                .findForUpdate(itemId, tenantId)
+                .orElseThrow(() -> error(
+                    HttpStatus.NOT_FOUND, "Medicine not found"));
+
+            TenantInventoryBatch batch = batchRepository
+                .findForUpdate(batchId, tenantId)
+                .orElseThrow(() -> error(
+                    HttpStatus.NOT_FOUND, "Batch not found"));
+
+            if (batch.getExpiryDate() == null
+                    || !batch.getExpiryDate().isAfter(LocalDate.now())
+                    || (!"ACTIVE".equalsIgnoreCase(batch.getStatus())
+                        && !"NEAR_EXPIRY".equalsIgnoreCase(batch.getStatus()))) {
+                throw error(
+                    HttpStatus.CONFLICT,
+                    "Batch is expired or unavailable for dispatch: " + batch.getBatchNumber());
+            }
+
+            StoreInventoryStock sourceStock = storeStockRepository
+                .findForUpdate(
+                    tenantId, transfer.getSourceStore().getId(), batchId)
+                .orElseThrow(() -> error(
+                    HttpStatus.CONFLICT, "Source-store stock allocation not found"));
+
+            int available = sourceStock.getQuantity() == null
+                ? 0 : sourceStock.getQuantity();
+
+            if (line.getQuantity() > available) {
+                throw error(
+                    HttpStatus.CONFLICT,
+                    "Insufficient source stock for " + batch.getBatchNumber());
+            }
+
+            sourceStock.setQuantity(available - line.getQuantity());
+            storeStockRepository.save(sourceStock);
+
+            movementService.record(
+                transfer.getTenant(),
+                inventoryItem,
+                batch,
+                "TRANSFER_OUT",
+                -line.getQuantity(),
+                sourceStock.getQuantity(),
+                "BRANCH_TRANSFER",
+                transfer.getId(),
+                transfer.getTransferNumber(),
+                "Dispatched from " + transfer.getSourceStore().getName()
+                    + " to " + transfer.getDestinationStore().getName(),
+                userId,
+                transfer.getSourceStore()
+            );
+        }
+
+        transfer.setStatus("DISPATCHED");
+        transfer.setDispatchedBy(userId);
+        transfer.setDispatchedAt(OffsetDateTime.now());
+
+        return toResponse(transferRepository.save(transfer));
+    }
+
+    @Transactional
+    public BranchTransferResponse receive(
+            Long tenantId,
+            Long transferId,
+            Long userId,
+            BranchTransferActionRequest request) {
+
+        authorize(tenantId, userId, HANDLER_ROLES);
+        BranchTransfer transfer = findTransferForUpdate(tenantId, transferId);
+        requireStatus(transfer, "DISPATCHED");
+
+        requireActiveStore(tenantId, transfer.getDestinationStore().getId());
+
+        if (request == null || request.items() == null
+                || request.items().size() != transfer.getItems().size()) {
+            throw error(
+                HttpStatus.BAD_REQUEST,
+                "Provide received quantity for every transfer line");
+        }
+
+        Map<Long, Integer> receivedByItem = new HashMap<>();
+        for (var line : request.items()) {
+            if (line == null || line.transferItemId() == null
+                    || line.receivedQuantity() == null
+                    || line.receivedQuantity() < 0) {
+                throw error(
+                    HttpStatus.BAD_REQUEST,
+                    "Each receipt line requires a transfer item ID and non-negative received quantity");
+            }
+
+            if (receivedByItem.put(line.transferItemId(), line.receivedQuantity()) != null) {
+                throw error(
+                    HttpStatus.BAD_REQUEST, "Duplicate receipt item");
+            }
+        }
+
+        Set<Long> expectedIds = transfer.getItems().stream()
+            .map(BranchTransferItem::getId)
+            .collect(Collectors.toSet());
+
+        if (!expectedIds.equals(receivedByItem.keySet())) {
+            throw error(
+                HttpStatus.BAD_REQUEST,
+                "Receipt lines do not match this transfer");
+        }
+
+        String note = cleanNote(request.note());
+
+        List<BranchTransferItem> items = transfer.getItems().stream()
+            .sorted(Comparator
+                .comparing((BranchTransferItem i) -> i.getInventoryItem().getId())
+                .thenComparing(i -> i.getBatch().getId()))
+            .toList();
+
+        for (BranchTransferItem line : items) {
+            int requested = line.getQuantity();
+            int received = receivedByItem.get(line.getId());
+
+            if (received > requested) {
+                throw error(
+                    HttpStatus.CONFLICT,
+                    "Received quantity cannot exceed dispatched quantity");
+            }
+
+            int damaged = requested - received;
+            Long itemId = line.getInventoryItem().getId();
+            Long batchId = line.getBatch().getId();
+
+            TenantInventoryItem inventoryItem = inventoryRepository
+                .findForUpdate(itemId, tenantId)
+                .orElseThrow(() -> error(
+                    HttpStatus.NOT_FOUND, "Medicine not found"));
+
+            TenantInventoryBatch batch = batchRepository
+                .findForUpdate(batchId, tenantId)
+                .orElseThrow(() -> error(
+                    HttpStatus.NOT_FOUND, "Batch not found"));
+
+            Store store = transfer.getDestinationStore();
+
+            StoreInventoryStock destinationStock = storeStockRepository
+                .findForUpdate(tenantId, store.getId(), batchId)
+                .orElse(null);
+
+            if (destinationStock == null) {
+                destinationStock = new StoreInventoryStock();
+                destinationStock.setTenant(transfer.getTenant());
+                destinationStock.setStore(store);
+                destinationStock.setInventoryItem(inventoryItem);
+                destinationStock.setBatch(batch);
+                destinationStock.setQuantity(0);
+            }
+
+            try {
+                destinationStock.setQuantity(Math.addExact(
+                    destinationStock.getQuantity() == null
+                        ? 0 : destinationStock.getQuantity(),
+                    received
+                ));
+            } catch (ArithmeticException exception) {
+                throw error(
+                    HttpStatus.BAD_REQUEST,
+                    "Destination stock exceeds the supported quantity range");
+            }
+
+            storeStockRepository.save(destinationStock);
+            line.setReceivedQuantity(received);
+
+            if (damaged > 0) {
+                int currentBatch = batch.getQuantity() == null
+                    ? 0 : batch.getQuantity();
+                int currentTotal = inventoryItem.getStockQuantity() == null
+                    ? 0 : inventoryItem.getStockQuantity();
+
+                if (damaged > currentBatch || damaged > currentTotal) {
+                    throw error(
+                        HttpStatus.CONFLICT,
+                        "Cannot account for damaged quantity against current inventory");
+                }
+
+                batch.setQuantity(currentBatch - damaged);
+                inventoryItem.setStockQuantity(currentTotal - damaged);
+                batchRepository.save(batch);
+                inventoryRepository.save(inventoryItem);
+            }
+
+            if (received > 0) {
+                String movementReason =
+                    "Received at " + store.getName()
+                    + "; dispatched=" + requested
+                    + ", received=" + received
+                    + ", damaged/missing=" + damaged
+                    + (note == null ? "" : "; " + note);
+
+                movementService.record(
+                    transfer.getTenant(),
+                    inventoryItem,
+                    batch,
+                    "TRANSFER_IN",
+                    received,
+                    destinationStock.getQuantity(),
+                    "BRANCH_TRANSFER",
+                    transfer.getId(),
+                    transfer.getTransferNumber(),
+                    movementReason,
+                    userId,
+                    store
+                );
+            }
+        }
+
+        transfer.setStatus("RECEIVED");
+        transfer.setReceivedBy(userId);
+        transfer.setReceivedAt(OffsetDateTime.now());
+        transfer.setActionNote(note);
+
+        return toResponse(transferRepository.save(transfer));
+    }
+
+    private BranchTransfer findTransfer(Long tenantId, Long transferId) {
+        return transferRepository.findByIdAndTenant_Id(transferId, tenantId)
+            .orElseThrow(() -> error(
+                HttpStatus.NOT_FOUND, "Transfer not found"));
+    }
+
+    private BranchTransfer findTransferForUpdate(
+            Long tenantId, Long transferId) {
+        return transferRepository.findForUpdate(transferId, tenantId)
+            .orElseThrow(() -> error(
+                HttpStatus.NOT_FOUND, "Transfer not found"));
+    }
+
+    private void requireStatus(BranchTransfer transfer, String expected) {
+        if (!expected.equals(transfer.getStatus())) {
+            throw error(
+                HttpStatus.CONFLICT,
+                "Transfer status must be " + expected
+                    + "; current status is " + transfer.getStatus());
+        }
+    }
+
+    private String cleanNote(String value) {
+        if (value == null || value.isBlank()) return null;
+        String note = value.trim();
+        if (note.length() > 500) {
+            throw error(
+                HttpStatus.BAD_REQUEST, "Action note cannot exceed 500 characters");
+        }
+        return note;
+    }
+
+    private BranchTransferResponse toResponse(BranchTransfer transfer) {
+        List<BranchTransferResponse.Item> items = transfer.getItems()
+            .stream()
+            .map(line -> {
+                TenantInventoryItem item = line.getInventoryItem();
+                TenantInventoryBatch batch = line.getBatch();
+                int quantity = line.getQuantity() == null ? 0 : line.getQuantity();
+                int received = line.getReceivedQuantity() == null
+                    ? 0 : line.getReceivedQuantity();
+
+                return new BranchTransferResponse.Item(
+                    line.getId(),
+                    item.getId(),
+                    item.getName(),
+                    item.getSku(),
+                    batch.getId(),
+                    batch.getBatchNumber(),
+                    batch.getExpiryDate(),
+                    quantity,
+                    received,
+                    transfer.getStatus().equals("RECEIVED")
+                        ? quantity - received : 0
+                );
+            })
+            .toList();
+
+        return new BranchTransferResponse(
+            transfer.getId(),
+            transfer.getTenant().getId(),
+            transfer.getTransferNumber(),
+            transfer.getSourceStore().getId(),
+            transfer.getSourceStore().getName(),
+            transfer.getDestinationStore().getId(),
+            transfer.getDestinationStore().getName(),
+            transfer.getStatus(),
+            transfer.getReason(),
+            transfer.getActionNote(),
+            transfer.getRequestedBy(),
+            transfer.getApprovedBy(),
+            transfer.getRejectedBy(),
+            transfer.getDispatchedBy(),
+            transfer.getReceivedBy(),
+            transfer.getCreatedAt(),
+            transfer.getApprovedAt(),
+            transfer.getRejectedAt(),
+            transfer.getDispatchedAt(),
+            transfer.getReceivedAt(),
+            items
+        );
+    }
+
+    private ResponseStatusException error(
+            HttpStatus status, String message) {
+        return new ResponseStatusException(status, message);
+    }
+}

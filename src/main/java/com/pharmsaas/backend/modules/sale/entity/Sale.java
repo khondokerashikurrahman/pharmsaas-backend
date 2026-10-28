@@ -2,6 +2,8 @@ package com.pharmsaas.backend.modules.sale.entity;
 
 import com.pharmsaas.backend.common.BaseEntity;
 import com.pharmsaas.backend.modules.tenant.entity.Tenant;
+import com.pharmsaas.backend.modules.user.entity.User;
+import com.pharmsaas.backend.modules.store.entity.Store;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 
@@ -22,6 +24,14 @@ public class Sale extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "tenant_id", nullable = false)
     private Tenant tenant;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "created_by_user_id")
+    private User createdBy;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "store_id")
+    private Store store;
 
     @Column(name = "invoice_number", nullable = false, length = 60)
     private String invoiceNumber;
@@ -63,6 +73,12 @@ public class Sale extends BaseEntity {
 
     public Tenant getTenant() { return tenant; }
     public void setTenant(Tenant tenant) { this.tenant = tenant; }
+
+    public User getCreatedBy() { return createdBy; }
+    public void setCreatedBy(User createdBy) { this.createdBy = createdBy; }
+
+    public Store getStore() { return store; }
+    public void setStore(Store store) { this.store = store; }
 
     public String getInvoiceNumber() { return invoiceNumber; }
     public void setInvoiceNumber(String invoiceNumber) { this.invoiceNumber = invoiceNumber; }

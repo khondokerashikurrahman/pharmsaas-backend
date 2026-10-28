@@ -16,8 +16,28 @@ public record GrnResponse(
     String notes,
     String status,
     OffsetDateTime createdAt,
-    List<Item> items
+    List<Item> items,
+    Long supplierId,
+    Long purchaseOrderId
 ) {
+    public GrnResponse(
+        Long id,
+        Long tenantId,
+        String grnNumber,
+        String supplierName,
+        String purchaseOrderNumber,
+        String supplierInvoiceNumber,
+        LocalDate receivedDate,
+        String notes,
+        String status,
+        OffsetDateTime createdAt,
+        List<Item> items
+    ) {
+        this(id, tenantId, grnNumber, supplierName, purchaseOrderNumber,
+            supplierInvoiceNumber, receivedDate, notes, status, createdAt,
+            items, null, null);
+    }
+
     public record Item(
         Long id,
         Long inventoryItemId,

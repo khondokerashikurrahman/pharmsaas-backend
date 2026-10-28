@@ -1,0 +1,248 @@
+package com.pharmsaas.backend.modules.sale.service;
+
+import com.pharmsaas.backend.modules.inventory.service.InventoryMovementService;
+
+import com.pharmsaas.backend.modules.inventory.entity.TenantInventoryBatch;
+import com.pharmsaas.backend.modules.inventory.entity.TenantInventoryItem;
+import com.pharmsaas.backend.modules.inventory.entity.StoreInventoryStock;
+import com.pharmsaas.backend.modules.store.entity.Store;
+import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryBatchRepository;
+import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryRepository;
+import com.pharmsaas.backend.modules.inventory.repository.StoreInventoryStockRepository;
+import com.pharmsaas.backend.modules.membership.entity.MembershipRole;
+import com.pharmsaas.backend.modules.membership.entity.TenantMembership;
+import com.pharmsaas.backend.modules.membership.repository.TenantMembershipRepository;
+import com.pharmsaas.backend.modules.sale.dto.SaleCreateRequest;
+import com.pharmsaas.backend.modules.sale.repository.SaleItemRepository;
+import com.pharmsaas.backend.modules.sale.repository.SaleRepository;
+import com.pharmsaas.backend.modules.store.repository.StoreRepository;
+import com.pharmsaas.backend.modules.tenant.entity.Tenant;
+import com.pharmsaas.backend.modules.tenant.repository.TenantRepository;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class SaleServiceValidationTest {
+
+    private static final Long TENANT_ID = 1L;
+    private static final Long USER_ID = 7L;
+    private static final Long PRODUCT_ID = 10L;
+    private static final Long BATCH_ID = 20L;
+    private static final Long STORE_ID = 30L;
+
+    private SaleRepository saleRepository;
+    private SaleItemRepository saleItemRepository;
+    private TenantInventoryRepository inventoryRepository;
+    private TenantInventoryBatchRepository batchRepository;
+    private StoreInventoryStockRepository storeStockRepository;
+    private TenantRepository tenantRepository;
+    private TenantMembershipRepository membershipRepository;
+    private StoreRepository storeRepository;
+    private InventoryMovementService movementService;
+
+    private SaleService service;
+    private Tenant tenant;
+    private TenantMembership membership;
+    private TenantInventoryItem item;
+    private TenantInventoryBatch batch;
+    private Store store;
+
+    @BeforeEach
+    void setUp() {
+        saleRepository = mock(SaleRepository.class);
+        saleItemRepository = mock(SaleItemRepository.class);
+        inventoryRepository = mock(TenantInventoryRepository.class);
+        batchRepository = mock(TenantInventoryBatchRepository.class);
+        storeStockRepository = mock(StoreInventoryStockRepository.class);
+        tenantRepository = mock(TenantRepository.class);
+        membershipRepository = mock(TenantMembershipRepository.class);
+        storeRepository = mock(StoreRepository.class);
+        movementService = mock(InventoryMovementService.class);
+
+        service = new SaleService(
+            saleRepository,
+            saleItemRepository,
+            inventoryRepository,
+            batchRepository,
+            storeStockRepository,
+            tenantRepository,
+            membershipRepository,
+            storeRepository,
+            movementService
+        );
+
+        tenant = mock(Tenant.class);
+        membership = mock(TenantMembership.class);
+        item = mock(TenantInventoryItem.class);
+        batch = mock(TenantInventoryBatch.class);
+        store = mock(Store.class);
+
+        when(tenantRepository.findById(TENANT_ID))
+            .thenReturn(Optional.of(tenant));
+        when(tenant.getStatus()).thenReturn("ACTIVE");
+        when(store.getId()).thenReturn(STORE_ID);
+        when(store.getStatus()).thenReturn("ACTIVE");
+        when(storeRepository.findByIdAndTenant_Id(STORE_ID, TENANT_ID))
+            .thenReturn(Optional.of(store));
+
+        when(membershipRepository.findByTenant_IdAndUser_IdAndActiveTrue(
+            TENANT_ID, USER_ID
+        )).thenReturn(Optional.of(membership));
+        when(membership.getRole()).thenReturn(MembershipRole.CASHIER);
+
+        when(inventoryRepository.findForUpdate(PRODUCT_ID, TENANT_ID))
+            .thenReturn(Optional.of(item));
+        when(batchRepository.findForUpdate(BATCH_ID, TENANT_ID))
+            .thenReturn(Optional.of(batch));
+
+        when(item.getId()).thenReturn(PRODUCT_ID);
+        when(item.getStatus()).thenReturn("ACTIVE");
+        when(item.getStockQuantity()).thenReturn(20);
+        when(item.getSellingPrice()).thenReturn(new BigDecimal("10.00"));
+
+        when(batch.getInventoryItem()).thenReturn(item);
+        when(batch.getStatus()).thenReturn("ACTIVE");
+        when(batch.getQuantity()).thenReturn(20);
+        when(batch.getExpiryDate()).thenReturn(LocalDate.now().plusDays(10));
+    }
+
+    private SaleCreateRequest request(int quantity) {
+        return request(quantity, STORE_ID);
+    }
+
+    private SaleCreateRequest request(int quantity, Long storeId) {
+        return new SaleCreateRequest(
+            "Validation Test",
+            storeId,
+            "CASH",
+            "amount",
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            new BigDecimal("1000.00"),
+            List.of(new SaleCreateRequest.SaleLineRequest(
+                PRODUCT_ID, BATCH_ID, quantity
+            ))
+        );
+    }
+
+    private ResponseStatusException assertConflict(String message) {
+        ResponseStatusException ex = assertThrows(
+            ResponseStatusException.class,
+            () -> service.create(TENANT_ID, USER_ID, request(2))
+        );
+
+        assertEquals(409, ex.getStatusCode().value());
+        assertTrue(
+            ex.getReason() != null && ex.getReason().contains(message),
+            "Expected error containing '" + message + "', actual: " + ex.getReason()
+        );
+
+        verify(batchRepository, never()).save(any(TenantInventoryBatch.class));
+        verify(storeStockRepository, never()).save(any(StoreInventoryStock.class));
+        verify(inventoryRepository, never()).save(any(TenantInventoryItem.class));
+        verify(saleRepository, never()).saveAndFlush(any());
+        verify(saleItemRepository, never()).saveAll(anyIterable());
+
+        return ex;
+    }
+
+    @Test
+    void rejectsSaleWithoutStore() {
+        ResponseStatusException ex = assertThrows(
+            ResponseStatusException.class,
+            () -> service.create(TENANT_ID, USER_ID, request(1, null))
+        );
+
+        assertEquals(400, ex.getStatusCode().value());
+        assertTrue(ex.getReason().contains("store must be selected"));
+
+        verifyNoInteractions(
+            inventoryRepository,
+            batchRepository,
+            storeStockRepository,
+            storeRepository,
+            saleRepository,
+            saleItemRepository
+        );
+    }
+
+    @Test
+    void rejectsInsufficientStoreAllocatedStock() {
+        StoreInventoryStock allocated = mock(StoreInventoryStock.class);
+        when(storeStockRepository.findForUpdate(TENANT_ID, STORE_ID, BATCH_ID))
+            .thenReturn(Optional.of(allocated));
+        when(allocated.getQuantity()).thenReturn(1);
+
+        assertConflict("Insufficient stock in selected store");
+    }
+
+    @Test
+    void rejectsExpiredBatch() {
+        when(batch.getExpiryDate()).thenReturn(LocalDate.now());
+
+        assertConflict("Expired medicine cannot be sold");
+    }
+
+    @Test
+    void rejectsBatchWithoutExpiryDate() {
+        when(batch.getExpiryDate()).thenReturn(null);
+
+        assertConflict("expiry date is missing");
+    }
+
+    @Test
+    void rejectsInactiveMedicine() {
+        when(item.getStatus()).thenReturn("INACTIVE");
+
+        assertConflict("Inactive medicine cannot be sold");
+    }
+
+    @Test
+    void rejectsInactiveBatch() {
+        when(batch.getStatus()).thenReturn("INACTIVE");
+
+        assertConflict("Inactive batch cannot be sold");
+    }
+
+    @Test
+    void rejectsInsufficientBatchStock() {
+        when(batch.getQuantity()).thenReturn(1);
+
+        assertConflict("Insufficient stock in batch");
+    }
+
+    @Test
+    void rejectsInsufficientInventoryStock() {
+        when(item.getStockQuantity()).thenReturn(1);
+
+        assertConflict("Insufficient inventory stock");
+    }
+
+    @Test
+    void staffCannotCreateSale() {
+        when(membership.getRole()).thenReturn(MembershipRole.STAFF);
+
+        ResponseStatusException ex = assertThrows(
+            ResponseStatusException.class,
+            () -> service.create(TENANT_ID, USER_ID, request(1))
+        );
+
+        assertEquals(403, ex.getStatusCode().value());
+
+        verifyNoInteractions(
+            inventoryRepository,
+            batchRepository,
+            saleRepository,
+            saleItemRepository
+        );
+    }
+}

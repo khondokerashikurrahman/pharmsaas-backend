@@ -2,6 +2,7 @@ package com.pharmsaas.backend.modules.purchaseorder.entity;
 
 import com.pharmsaas.backend.common.BaseEntity;
 import com.pharmsaas.backend.modules.tenant.entity.Tenant;
+import com.pharmsaas.backend.modules.supplier.entity.Supplier;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -21,6 +22,10 @@ public class PurchaseOrder extends BaseEntity {
 
     @Column(nullable = false, length = 150)
     private String supplierName;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "supplier_id")
+    private Supplier supplier;
 
     private Long branchId;
 
@@ -68,6 +73,9 @@ public class PurchaseOrder extends BaseEntity {
 
     public String getSupplierName() { return supplierName; }
     public void setSupplierName(String supplierName) { this.supplierName = supplierName; }
+
+    public Supplier getSupplier() { return supplier; }
+    public void setSupplier(Supplier supplier) { this.supplier = supplier; }
 
     public Long getBranchId() { return branchId; }
     public void setBranchId(Long branchId) { this.branchId = branchId; }

@@ -11,6 +11,7 @@ public record InventoryItemResponse(
     String brandName,
     String strength,
     String dosageForm,
+    String category,
     String sku,
     String barcode,
     BigDecimal purchasePrice,
@@ -19,5 +20,44 @@ public record InventoryItemResponse(
     Integer reorderLevel,
     String status,
     OffsetDateTime createdAt,
-    OffsetDateTime updatedAt
-) {}
+    OffsetDateTime updatedAt,
+    String description,
+    String productType,
+    Long categoryId,
+    Long genericId,
+    Long dosageFormId,
+    Long companyId
+) {
+    // Backwards-compatible constructor for existing service/tests.
+    public InventoryItemResponse(
+        Long id, Long tenantId, String name, String genericName,
+        String brandName, String strength, String dosageForm,
+        String category, String sku, String barcode,
+        BigDecimal purchasePrice, BigDecimal sellingPrice,
+        Integer stockQuantity, Integer reorderLevel, String status,
+        OffsetDateTime createdAt, OffsetDateTime updatedAt,
+        String description, String productType
+    ) {
+        this(id, tenantId, name, genericName, brandName, strength,
+            dosageForm, category, sku, barcode, purchasePrice,
+            sellingPrice, stockQuantity, reorderLevel, status,
+            createdAt, updatedAt, description, productType,
+            null, null, null, null);
+    }
+
+    public InventoryItemResponse(
+        Long id, Long tenantId, String name, String genericName,
+        String brandName, String strength, String dosageForm,
+        String category, String sku, String barcode,
+        BigDecimal purchasePrice, BigDecimal sellingPrice,
+        Integer stockQuantity, Integer reorderLevel, String status,
+        OffsetDateTime createdAt, OffsetDateTime updatedAt,
+        String description
+    ) {
+        this(id, tenantId, name, genericName, brandName, strength,
+            dosageForm, category, sku, barcode, purchasePrice,
+            sellingPrice, stockQuantity, reorderLevel, status,
+            createdAt, updatedAt, description, "MEDICINE",
+            null, null, null, null);
+    }
+}

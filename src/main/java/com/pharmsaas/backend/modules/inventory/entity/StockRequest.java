@@ -20,6 +20,10 @@ public class StockRequest extends BaseEntity {
     @JoinColumn(name = "inventory_item_id", nullable = false)
     private TenantInventoryItem inventoryItem;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "batch_id")
+    private TenantInventoryBatch batch;
+
     @Column(name = "requester_user_id", nullable = false)
     private Long requesterUserId;
 
@@ -53,6 +57,9 @@ public class StockRequest extends BaseEntity {
 
     public TenantInventoryItem getInventoryItem() { return inventoryItem; }
     public void setInventoryItem(TenantInventoryItem inventoryItem) { this.inventoryItem = inventoryItem; }
+
+    public TenantInventoryBatch getBatch() { return batch; }
+    public void setBatch(TenantInventoryBatch batch) { this.batch = batch; }
 
     public Long getRequesterUserId() { return requesterUserId; }
     public void setRequesterUserId(Long requesterUserId) { this.requesterUserId = requesterUserId; }

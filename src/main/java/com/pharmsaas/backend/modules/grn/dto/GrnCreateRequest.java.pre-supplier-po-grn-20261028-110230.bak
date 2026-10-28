@@ -1,0 +1,36 @@
+package com.pharmsaas.backend.modules.grn.dto;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+
+public record GrnCreateRequest(
+    String supplierName,
+    String purchaseOrderNumber,
+    String supplierInvoiceNumber,
+    LocalDate receivedDate,
+    String notes,
+    List<Item> items,
+    Long storeId
+) {
+    public GrnCreateRequest(
+            String supplierName,
+            String purchaseOrderNumber,
+            String supplierInvoiceNumber,
+            LocalDate receivedDate,
+            String notes,
+            List<Item> items) {
+        this(supplierName, purchaseOrderNumber, supplierInvoiceNumber,
+            receivedDate, notes, items, null);
+    }
+
+    public record Item(
+        Long inventoryItemId,
+        String batchNumber,
+        LocalDate manufactureDate,
+        LocalDate expiryDate,
+        Integer quantity,
+        BigDecimal purchasePrice,
+        BigDecimal sellingPrice
+    ) {}
+}

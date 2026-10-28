@@ -2,6 +2,10 @@ package com.pharmsaas.backend.modules.inventory.entity;
 
 import com.pharmsaas.backend.common.BaseEntity;
 import com.pharmsaas.backend.modules.tenant.entity.Tenant;
+import com.pharmsaas.backend.modules.category.entity.ProductCategory;
+import com.pharmsaas.backend.modules.generic.entity.ProductGeneric;
+import com.pharmsaas.backend.modules.dosageform.entity.ProductDosageForm;
+import com.pharmsaas.backend.modules.company.entity.ManufacturerCompany;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 
@@ -29,11 +33,20 @@ public class TenantInventoryItem extends BaseEntity {
     @Column(length = 150)
     private String brandName;
 
+    @Column(name = "product_type", length = 40)
+    private String productType = "MEDICINE";
+
     @Column(length = 80)
     private String strength;
 
     @Column(length = 80)
     private String dosageForm;
+
+    @Column(length = 80)
+    private String category;
+
+    @Column(length = 2000)
+    private String description;
 
     @Column(nullable = false, length = 60)
     private String sku;
@@ -56,6 +69,36 @@ public class TenantInventoryItem extends BaseEntity {
     @Column(nullable = false, length = 20)
     private String status = "ACTIVE";
 
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "category_id")
+    private ProductCategory categoryMaster;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "generic_id")
+    private ProductGeneric genericMaster;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "dosage_form_id")
+    private ProductDosageForm dosageFormMaster;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "company_id")
+    private ManufacturerCompany companyMaster;
+
+
+    public ProductCategory getCategoryMaster() { return categoryMaster; }
+    public void setCategoryMaster(ProductCategory categoryMaster) { this.categoryMaster = categoryMaster; }
+
+    public ProductGeneric getGenericMaster() { return genericMaster; }
+    public void setGenericMaster(ProductGeneric genericMaster) { this.genericMaster = genericMaster; }
+
+    public ProductDosageForm getDosageFormMaster() { return dosageFormMaster; }
+    public void setDosageFormMaster(ProductDosageForm dosageFormMaster) { this.dosageFormMaster = dosageFormMaster; }
+
+    public ManufacturerCompany getCompanyMaster() { return companyMaster; }
+    public void setCompanyMaster(ManufacturerCompany companyMaster) { this.companyMaster = companyMaster; }
+
     public TenantInventoryItem() {
     }
 
@@ -70,12 +113,18 @@ public class TenantInventoryItem extends BaseEntity {
 
     public String getBrandName() { return brandName; }
     public void setBrandName(String brandName) { this.brandName = brandName; }
+    public String getProductType() { return productType; }
+    public void setProductType(String productType) { this.productType = productType; }
 
     public String getStrength() { return strength; }
     public void setStrength(String strength) { this.strength = strength; }
 
     public String getDosageForm() { return dosageForm; }
     public void setDosageForm(String dosageForm) { this.dosageForm = dosageForm; }
+    public String getCategory() { return category; }
+    public void setCategory(String category) { this.category = category; }
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
 
     public String getSku() { return sku; }
     public void setSku(String sku) { this.sku = sku; }

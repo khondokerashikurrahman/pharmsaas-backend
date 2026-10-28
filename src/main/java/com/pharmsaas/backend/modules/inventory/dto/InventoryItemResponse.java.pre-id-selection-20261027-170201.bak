@@ -1,0 +1,40 @@
+package com.pharmsaas.backend.modules.inventory.dto;
+
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+
+public record InventoryItemResponse(
+    Long id,
+    Long tenantId,
+    String name,
+    String genericName,
+    String brandName,
+    String strength,
+    String dosageForm,
+    String category,
+    String sku,
+    String barcode,
+    BigDecimal purchasePrice,
+    BigDecimal sellingPrice,
+    Integer stockQuantity,
+    Integer reorderLevel,
+    String status,
+    OffsetDateTime createdAt,
+    OffsetDateTime updatedAt,
+    String description,
+    String productType
+) {
+    public InventoryItemResponse(
+            Long id, Long tenantId, String name, String genericName,
+            String brandName, String strength, String dosageForm,
+            String category, String sku, String barcode,
+            BigDecimal purchasePrice, BigDecimal sellingPrice,
+            Integer stockQuantity, Integer reorderLevel, String status,
+            OffsetDateTime createdAt, OffsetDateTime updatedAt,
+            String description) {
+        this(id, tenantId, name, genericName, brandName, strength,
+             dosageForm, category, sku, barcode, purchasePrice,
+             sellingPrice, stockQuantity, reorderLevel, status,
+             createdAt, updatedAt, description, "MEDICINE");
+    }
+}

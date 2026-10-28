@@ -10,6 +10,7 @@ import com.pharmsaas.backend.modules.tenant.entity.Tenant;
 import com.pharmsaas.backend.modules.tenant.repository.TenantRepository;
 import com.pharmsaas.backend.modules.user.entity.User;
 import com.pharmsaas.backend.modules.user.repository.UserRepository;
+import com.pharmsaas.backend.modules.store.service.StoreService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -26,16 +27,19 @@ public class PublicTenantRegistrationService {
     private final TenantRepository tenantRepository;
     private final UserRepository userRepository;
     private final TenantMembershipRepository membershipRepository;
+    private final StoreService storeService;
     private final PasswordEncoder passwordEncoder;
 
     public PublicTenantRegistrationService(
             TenantRepository tenantRepository,
             UserRepository userRepository,
             TenantMembershipRepository membershipRepository,
+            StoreService storeService,
             PasswordEncoder passwordEncoder) {
         this.tenantRepository = tenantRepository;
         this.userRepository = userRepository;
         this.membershipRepository = membershipRepository;
+        this.storeService = storeService;
         this.passwordEncoder = passwordEncoder;
     }
 
@@ -80,6 +84,8 @@ public class PublicTenantRegistrationService {
         tenant.setStatus("Pending");
 
         Tenant savedTenant = tenantRepository.save(tenant);
+
+        storeService.ensureDefaultStore(savedTenant);
 
         // 2. Create the owner account.
         User owner = new User();

@@ -5,6 +5,7 @@ import java.util.List;
 
 public record SaleCreateRequest(
     String customerName,
+    Long storeId,
     String paymentMethod,
     String discountType,
     BigDecimal discountValue,

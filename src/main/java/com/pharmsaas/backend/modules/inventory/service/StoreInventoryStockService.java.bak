@@ -1,0 +1,297 @@
+package com.pharmsaas.backend.modules.inventory.service;
+
+import com.pharmsaas.backend.modules.inventory.dto.StoreInventoryStockResponse;
+import com.pharmsaas.backend.modules.inventory.dto.StoreStockAllocationRequest;
+import com.pharmsaas.backend.modules.inventory.entity.StoreInventoryStock;
+import com.pharmsaas.backend.modules.inventory.entity.TenantInventoryBatch;
+import com.pharmsaas.backend.modules.inventory.entity.TenantInventoryItem;
+import com.pharmsaas.backend.modules.inventory.repository.StoreInventoryStockRepository;
+import com.pharmsaas.backend.modules.branchtransfer.repository.BranchTransferRepository;
+import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryBatchRepository;
+import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryRepository;
+import com.pharmsaas.backend.modules.membership.entity.MembershipRole;
+import com.pharmsaas.backend.modules.membership.repository.TenantMembershipRepository;
+import com.pharmsaas.backend.modules.store.entity.Store;
+import com.pharmsaas.backend.modules.store.repository.StoreRepository;
+import com.pharmsaas.backend.modules.tenant.entity.Tenant;
+import com.pharmsaas.backend.modules.tenant.repository.TenantRepository;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.time.LocalDate;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Set;
+
+@Service
+public class StoreInventoryStockService {
+
+    private static final Set<MembershipRole> READ_ROLES = Set.of(
+        MembershipRole.TENANT_OWNER,
+        MembershipRole.PHARMACY_ADMIN,
+        MembershipRole.MANAGER,
+        MembershipRole.STORE_KEEPER,
+        MembershipRole.PHARMACIST,
+        MembershipRole.STAFF,
+        MembershipRole.CASHIER
+    );
+
+    private static final Set<MembershipRole> ALLOCATION_ROLES = Set.of(
+        MembershipRole.TENANT_OWNER,
+        MembershipRole.PHARMACY_ADMIN,
+        MembershipRole.MANAGER
+    );
+
+    private final StoreInventoryStockRepository stockRepository;
+    private final BranchTransferRepository transferRepository;
+    private final TenantInventoryBatchRepository batchRepository;
+    private final TenantInventoryRepository inventoryRepository;
+    private final StoreRepository storeRepository;
+    private final TenantRepository tenantRepository;
+    private final TenantMembershipRepository membershipRepository;
+
+    public StoreInventoryStockService(
+            StoreInventoryStockRepository stockRepository,
+            BranchTransferRepository transferRepository,
+            TenantInventoryBatchRepository batchRepository,
+            TenantInventoryRepository inventoryRepository,
+            StoreRepository storeRepository,
+            TenantRepository tenantRepository,
+            TenantMembershipRepository membershipRepository) {
+        this.stockRepository = stockRepository;
+        this.transferRepository = transferRepository;
+        this.batchRepository = batchRepository;
+        this.inventoryRepository = inventoryRepository;
+        this.storeRepository = storeRepository;
+        this.tenantRepository = tenantRepository;
+        this.membershipRepository = membershipRepository;
+    }
+
+    private Tenant authorize(
+            Long tenantId,
+            Long userId,
+            boolean allocation) {
+
+        Tenant tenant = tenantRepository.findById(tenantId)
+            .orElseThrow(() -> error(
+                HttpStatus.NOT_FOUND, "Tenant not found"));
+
+        if (tenant.getStatus() == null
+                || !"ACTIVE".equalsIgnoreCase(tenant.getStatus())) {
+            throw error(
+                HttpStatus.FORBIDDEN, "Tenant must be Active");
+        }
+
+        var membership = membershipRepository
+            .findByTenant_IdAndUser_IdAndActiveTrue(tenantId, userId)
+            .orElseThrow(() -> error(
+                HttpStatus.FORBIDDEN,
+                "Active tenant membership required"));
+
+        MembershipRole role = membership.getRole();
+
+        if (allocation && !ALLOCATION_ROLES.contains(role)) {
+            throw error(
+                HttpStatus.FORBIDDEN,
+                "Only Tenant Owner, Pharmacy Admin or Manager can allocate store stock");
+        }
+
+        if (!allocation && !READ_ROLES.contains(role)) {
+            throw error(
+                HttpStatus.FORBIDDEN,
+                "You cannot view store inventory");
+        }
+
+        return tenant;
+    }
+
+    private Store requireActiveStore(Long tenantId, Long storeId) {
+        Store store = storeRepository
+            .findByIdAndTenant_Id(storeId, tenantId)
+            .orElseThrow(() -> error(
+                HttpStatus.NOT_FOUND, "Store not found for this tenant"));
+
+        if (store.getStatus() == null
+                || !"ACTIVE".equalsIgnoreCase(store.getStatus())) {
+            throw error(
+                HttpStatus.CONFLICT, "Store must be Active");
+        }
+
+        return store;
+    }
+
+    @Transactional(readOnly = true)
+    public List<StoreInventoryStockResponse> list(
+            Long tenantId,
+            Long storeId,
+            Long userId) {
+
+        authorize(tenantId, userId, false);
+        Store store = requireActiveStore(tenantId, storeId);
+
+        return stockRepository
+            .findAllByTenant_IdAndStore_Id(tenantId, storeId)
+            .stream()
+            .sorted(
+                Comparator
+                    .comparing(
+                        (StoreInventoryStock row) ->
+                            row.getInventoryItem().getName(),
+                        String.CASE_INSENSITIVE_ORDER
+                    )
+                    .thenComparing(
+                        row -> row.getBatch().getExpiryDate(),
+                        Comparator.nullsLast(Comparator.naturalOrder())
+                    )
+            )
+            .map(row -> toResponse(row, store))
+            .toList();
+    }
+
+    @Transactional
+    public StoreInventoryStockResponse allocate(
+            Long tenantId,
+            Long storeId,
+            Long userId,
+            StoreStockAllocationRequest request) {
+
+        Tenant tenant = authorize(tenantId, userId, true);
+        Store store = requireActiveStore(tenantId, storeId);
+
+        if (request == null
+                || request.batchId() == null
+                || request.quantity() == null
+                || request.quantity() <= 0) {
+            throw error(
+                HttpStatus.BAD_REQUEST,
+                "Batch ID and a positive allocation quantity are required");
+        }
+
+        // Find the item's ID first, then lock in item -> batch order.
+        TenantInventoryBatch snapshot = batchRepository
+            .findByIdAndTenant_Id(request.batchId(), tenantId)
+            .orElseThrow(() -> error(
+                HttpStatus.NOT_FOUND, "Batch not found for this tenant"));
+
+        Long itemId = snapshot.getInventoryItem().getId();
+
+        TenantInventoryItem item = inventoryRepository
+            .findForUpdate(itemId, tenantId)
+            .orElseThrow(() -> error(
+                HttpStatus.NOT_FOUND, "Medicine not found for this tenant"));
+
+        TenantInventoryBatch batch = batchRepository
+            .findForUpdate(request.batchId(), tenantId)
+            .orElseThrow(() -> error(
+                HttpStatus.NOT_FOUND, "Batch not found for this tenant"));
+
+        if (batch.getInventoryItem() == null
+                || !item.getId().equals(batch.getInventoryItem().getId())) {
+            throw error(
+                HttpStatus.CONFLICT,
+                "Batch-to-medicine association is invalid");
+        }
+
+        if (!"ACTIVE".equalsIgnoreCase(item.getStatus())) {
+            throw error(
+                HttpStatus.CONFLICT,
+                "Cannot allocate stock for an inactive medicine");
+        }
+
+        if (batch.getExpiryDate() == null
+                || !batch.getExpiryDate().isAfter(LocalDate.now())) {
+            throw error(
+                HttpStatus.CONFLICT,
+                "Expired or undated batches cannot be allocated as available stock");
+        }
+
+        if (!"ACTIVE".equalsIgnoreCase(batch.getStatus())
+                && !"NEAR_EXPIRY".equalsIgnoreCase(batch.getStatus())) {
+            throw error(
+                HttpStatus.CONFLICT,
+                "Only active or near-expiry batches can be allocated");
+        }
+
+        int batchQuantity = batch.getQuantity() == null
+            ? 0 : batch.getQuantity();
+
+        Long allocatedResult =
+            stockRepository.sumAllocatedQuantity(tenantId, batch.getId());
+        long alreadyAllocated = allocatedResult == null ? 0L : allocatedResult;
+
+        Long inTransitResult = transferRepository
+            .sumDispatchedQuantityForBatch(tenantId, batch.getId());
+        long inTransit = inTransitResult == null ? 0L : inTransitResult;
+
+        long unallocated =
+            (long) batchQuantity - alreadyAllocated - inTransit;
+
+        if (request.quantity() > unallocated) {
+            throw error(
+                HttpStatus.CONFLICT,
+                "Allocation exceeds unallocated batch stock. Available: "
+                    + Math.max(unallocated, 0L));
+        }
+
+        StoreInventoryStock row = stockRepository
+            .findForUpdate(tenantId, storeId, batch.getId())
+            .orElse(null);
+
+        if (row == null) {
+            row = new StoreInventoryStock();
+            row.setTenant(tenant);
+            row.setStore(store);
+            row.setInventoryItem(item);
+            row.setBatch(batch);
+            row.setQuantity(0);
+        }
+
+        try {
+            row.setQuantity(Math.addExact(
+                row.getQuantity() == null ? 0 : row.getQuantity(),
+                request.quantity()
+            ));
+        } catch (ArithmeticException exception) {
+            throw error(
+                HttpStatus.BAD_REQUEST,
+                "Allocation exceeds the supported quantity range");
+        }
+
+        StoreInventoryStock saved = stockRepository.save(row);
+        return toResponse(saved, store);
+    }
+
+    private StoreInventoryStockResponse toResponse(
+            StoreInventoryStock row,
+            Store store) {
+
+        TenantInventoryItem item = row.getInventoryItem();
+        TenantInventoryBatch batch = row.getBatch();
+
+        return new StoreInventoryStockResponse(
+            row.getId(),
+            row.getTenant().getId(),
+            store.getId(),
+            store.getName(),
+            item.getId(),
+            item.getName(),
+            item.getSku(),
+            batch.getId(),
+            batch.getBatchNumber(),
+            batch.getExpiryDate(),
+            row.getQuantity(),
+            batch.getStatus(),
+            row.getCreatedAt(),
+            row.getUpdatedAt()
+        );
+    }
+
+    private ResponseStatusException error(
+            HttpStatus status,
+            String message) {
+        return new ResponseStatusException(status, message);
+    }
+}

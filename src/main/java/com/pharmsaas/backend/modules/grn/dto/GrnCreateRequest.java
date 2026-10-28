@@ -10,8 +10,35 @@ public record GrnCreateRequest(
     String supplierInvoiceNumber,
     LocalDate receivedDate,
     String notes,
-    List<Item> items
+    List<Item> items,
+    Long storeId,
+    Long supplierId
 ) {
+    public GrnCreateRequest(
+        String supplierName,
+        String purchaseOrderNumber,
+        String supplierInvoiceNumber,
+        LocalDate receivedDate,
+        String notes,
+        List<Item> items
+    ) {
+        this(supplierName, purchaseOrderNumber, supplierInvoiceNumber,
+            receivedDate, notes, items, null, null);
+    }
+
+    public GrnCreateRequest(
+        String supplierName,
+        String purchaseOrderNumber,
+        String supplierInvoiceNumber,
+        LocalDate receivedDate,
+        String notes,
+        List<Item> items,
+        Long storeId
+    ) {
+        this(supplierName, purchaseOrderNumber, supplierInvoiceNumber,
+            receivedDate, notes, items, storeId, null);
+    }
+
     public record Item(
         Long inventoryItemId,
         String batchNumber,

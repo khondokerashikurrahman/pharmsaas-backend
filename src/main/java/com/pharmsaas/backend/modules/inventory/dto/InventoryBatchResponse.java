@@ -2,6 +2,7 @@ package com.pharmsaas.backend.modules.inventory.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 
 public record InventoryBatchResponse(
     Long id,
@@ -13,5 +14,6 @@ public record InventoryBatchResponse(
     LocalDate expiryDate,
     Integer quantity,
     BigDecimal purchasePrice,
-    String status
+    String status,
+    OffsetDateTime createdAt
 ) {}

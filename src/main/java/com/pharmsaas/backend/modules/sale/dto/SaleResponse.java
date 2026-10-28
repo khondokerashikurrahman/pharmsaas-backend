@@ -19,6 +19,11 @@ public record SaleResponse(
     BigDecimal changeAmount,
     String status,
     OffsetDateTime createdAt,
+    Long cashierId,
+    String cashierName,
+    Long storeId,
+    String storeName,
+    String storeCode,
     List<Item> items
 ) {
     public record Item(

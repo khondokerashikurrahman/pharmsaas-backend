@@ -5,6 +5,7 @@ import com.pharmsaas.backend.modules.inventory.dto.InventoryBatchResponse;
 import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryRepository;
 import com.pharmsaas.backend.modules.inventory.entity.TenantInventoryItem;
 import com.pharmsaas.backend.modules.inventory.entity.TenantInventoryBatch;
+import com.pharmsaas.backend.modules.store.entity.Store;
 import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryBatchRepository;
 import com.pharmsaas.backend.modules.membership.entity.MembershipRole;
 import com.pharmsaas.backend.modules.membership.repository.TenantMembershipRepository;
@@ -25,17 +26,20 @@ public class InventoryBatchService {
     private final TenantInventoryRepository inventoryRepository;
     private final TenantMembershipRepository membershipRepository;
     private final TenantRepository tenantRepository;
+    private final InventoryMovementService movementService;
 
 
     public InventoryBatchService(
             TenantInventoryBatchRepository batchRepository,
             TenantInventoryRepository inventoryRepository,
             TenantMembershipRepository membershipRepository,
-            TenantRepository tenantRepository) {
+            TenantRepository tenantRepository,
+            InventoryMovementService movementService) {
         this.batchRepository = batchRepository;
         this.inventoryRepository = inventoryRepository;
         this.membershipRepository = membershipRepository;
         this.tenantRepository = tenantRepository;
+        this.movementService = movementService;
 
     }
 
@@ -127,6 +131,52 @@ public class InventoryBatchService {
     @Transactional
     public InventoryBatchResponse create(
             Long tenantId, Long userId, InventoryBatchCreateRequest request) {
+        return createInternal(
+            tenantId, userId, request,
+            "STOCK_IN", "BATCH", null, null, "Batch stock received", null
+        );
+    }
+
+    @Transactional
+    public InventoryBatchResponse createForGrn(
+            Long tenantId,
+            Long userId,
+            InventoryBatchCreateRequest request,
+            Long grnId,
+            String grnNumber) {
+        return createForGrn(tenantId, userId, request, grnId, grnNumber, null);
+    }
+
+    @Transactional
+    public InventoryBatchResponse createForGrn(
+            Long tenantId,
+            Long userId,
+            InventoryBatchCreateRequest request,
+            Long grnId,
+            String grnNumber,
+            Store store) {
+        if (grnId == null || grnNumber == null || grnNumber.isBlank()) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "A saved GRN reference is required"
+            );
+        }
+
+        return createInternal(
+            tenantId, userId, request,
+            "GRN_RECEIVED", "GRN", grnId, grnNumber, "Goods received note", store
+        );
+    }
+
+    private InventoryBatchResponse createInternal(
+            Long tenantId,
+            Long userId,
+            InventoryBatchCreateRequest request,
+            String movementType,
+            String referenceType,
+            Long referenceId,
+            String referenceNumber,
+            String movementReason,
+            Store store) {
         authorize(tenantId, userId, true);
 
         if (request == null || request.inventoryItemId() == null) {
@@ -205,10 +255,26 @@ public class InventoryBatchService {
         item.setPurchasePrice(request.purchasePrice());
         item.setSellingPrice(request.sellingPrice());
 
-        batchRepository.save(batch);
+        TenantInventoryBatch savedBatch = batchRepository.save(batch);
         inventoryRepository.save(item);
 
-        return toResponse(batch);
+        // Record incoming stock in the same transaction as the quantity update.
+        movementService.record(
+            item.getTenant(),
+            item,
+            savedBatch,
+            movementType,
+            request.quantity(),
+            store == null ? savedBatch.getQuantity() : request.quantity(),
+            referenceType,
+            referenceId,
+            referenceNumber,
+            movementReason,
+            userId,
+            store
+        );
+
+        return toResponse(savedBatch);
     }
 
     private InventoryBatchResponse toResponse(TenantInventoryBatch batch) {
@@ -222,7 +288,8 @@ public class InventoryBatchService {
             batch.getExpiryDate(),
             batch.getQuantity(),
             batch.getPurchasePrice(),
-            batch.getStatus()
+            batch.getStatus(),
+            batch.getCreatedAt()
         );
     }
 }
