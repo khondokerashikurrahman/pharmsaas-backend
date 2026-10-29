@@ -282,7 +282,13 @@ public class StoreService {
         );
 
         Store store = findStore(tenantId, storeId);
-        storeRepository.delete(store);
+
+        // Archive instead of hard deleting: preserve historical references.
+        if (store.getStatus() == null
+                || !"Inactive".equalsIgnoreCase(store.getStatus().trim())) {
+            store.setStatus("Inactive");
+            storeRepository.save(store);
+        }
     }
 
     private Store findStore(

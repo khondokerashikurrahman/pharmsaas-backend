@@ -148,6 +148,7 @@ public class SaleService {
         Set<Long> usedBatches = new HashSet<>();
         List<SaleItem> saleItems = new ArrayList<>();
         BigDecimal subtotal = ZERO;
+        BigDecimal itemDiscountTotal = ZERO;
 
         for (SaleCreateRequest.SaleLineRequest line : request.items()) {
             if (line == null || line.productId() == null ||
@@ -235,8 +236,20 @@ public class SaleService {
                 throw error(HttpStatus.BAD_REQUEST, "Invalid product selling price");
             }
 
-            BigDecimal lineTotal = unitPrice
+            BigDecimal grossLineTotal = unitPrice
                 .multiply(BigDecimal.valueOf(line.quantity()))
+                .setScale(2, RoundingMode.HALF_UP);
+
+            BigDecimal lineDiscount = money(line.discountAmount());
+            if (lineDiscount.signum() < 0 ||
+                lineDiscount.compareTo(grossLineTotal) > 0) {
+                throw error(
+                    HttpStatus.BAD_REQUEST,
+                    "Item discount must be between zero and the line amount"
+                );
+            }
+
+            BigDecimal lineTotal = grossLineTotal.subtract(lineDiscount)
                 .setScale(2, RoundingMode.HALF_UP);
 
             SaleItem saleItem = new SaleItem();
@@ -244,10 +257,12 @@ public class SaleService {
             saleItem.setBatch(batch);
             saleItem.setQuantity(line.quantity());
             saleItem.setUnitPrice(unitPrice);
+            saleItem.setDiscountAmount(lineDiscount);
             saleItem.setSubtotal(lineTotal);
             saleItems.add(saleItem);
 
-            subtotal = subtotal.add(lineTotal);
+            subtotal = subtotal.add(grossLineTotal);
+            itemDiscountTotal = itemDiscountTotal.add(lineDiscount);
 
             batch.setQuantity(batch.getQuantity() - line.quantity());
             item.setStockQuantity(item.getStockQuantity() - line.quantity());
@@ -261,14 +276,22 @@ public class SaleService {
             }
         }
 
-        BigDecimal discount = "percentage".equals(discountType)
-            ? subtotal.multiply(discountValue)
+        BigDecimal subtotalAfterItemDiscounts = subtotal.subtract(itemDiscountTotal);
+
+        BigDecimal orderDiscount = "percentage".equals(discountType)
+            ? subtotalAfterItemDiscounts.multiply(discountValue)
                 .divide(HUNDRED, 2, RoundingMode.HALF_UP)
             : discountValue.setScale(2, RoundingMode.HALF_UP);
 
-        if (discount.compareTo(subtotal) > 0) {
-            throw error(HttpStatus.BAD_REQUEST, "Discount cannot exceed subtotal");
+        if (orderDiscount.compareTo(subtotalAfterItemDiscounts) > 0) {
+            throw error(
+                HttpStatus.BAD_REQUEST,
+                "Order discount cannot exceed the amount after item discounts"
+            );
         }
+
+        BigDecimal discount = itemDiscountTotal.add(orderDiscount)
+            .setScale(2, RoundingMode.HALF_UP);
 
         BigDecimal taxableAmount = subtotal.subtract(discount);
         BigDecimal tax = taxableAmount.multiply(taxRate)
@@ -395,6 +418,7 @@ public class SaleService {
                 line.getBatch().getBatchNumber(),
                 line.getQuantity(),
                 line.getUnitPrice(),
+                line.getDiscountAmount(),
                 line.getSubtotal()
             )
         ).toList();

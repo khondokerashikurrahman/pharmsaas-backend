@@ -34,6 +34,7 @@ public record SaleResponse(
         String batchNumber,
         Integer quantity,
         BigDecimal unitPrice,
+        BigDecimal discountAmount,
         BigDecimal subtotal
     ) {}
 }

@@ -10,6 +10,7 @@ import com.pharmsaas.backend.modules.purchaseorder.entity.PurchaseOrderStatus;
 import com.pharmsaas.backend.modules.purchaseorder.repository.PurchaseOrderRepository;
 import com.pharmsaas.backend.modules.supplier.entity.Supplier;
 import com.pharmsaas.backend.modules.supplier.repository.SupplierRepository;
+import com.pharmsaas.backend.modules.store.repository.StoreRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import com.pharmsaas.backend.modules.tenant.repository.TenantRepository;
 import org.springframework.http.HttpStatus;
@@ -30,28 +31,38 @@ public class PurchaseOrderService {
     private final TenantRepository tenantRepository;
     private final TenantMembershipRepository membershipRepository;
     private final SupplierRepository supplierRepository;
+    private final StoreRepository storeRepository;
 
     @Autowired
     public PurchaseOrderService(
             PurchaseOrderRepository orderRepository,
             TenantRepository tenantRepository,
             TenantMembershipRepository membershipRepository,
-            SupplierRepository supplierRepository) {
+            SupplierRepository supplierRepository,
+            StoreRepository storeRepository) {
         this.orderRepository = orderRepository;
         this.tenantRepository = tenantRepository;
         this.membershipRepository = membershipRepository;
         this.supplierRepository = supplierRepository;
+        this.storeRepository = storeRepository;
     }
 
-    // Backwards-compatible constructor for existing unit tests.
+    // Backwards-compatible constructors for existing unit tests.
+    public PurchaseOrderService(
+            PurchaseOrderRepository orderRepository,
+            TenantRepository tenantRepository,
+            TenantMembershipRepository membershipRepository,
+            SupplierRepository supplierRepository) {
+        this(orderRepository, tenantRepository, membershipRepository,
+                supplierRepository, null);
+    }
+
     public PurchaseOrderService(
             PurchaseOrderRepository orderRepository,
             TenantRepository tenantRepository,
             TenantMembershipRepository membershipRepository) {
-        this.orderRepository = orderRepository;
-        this.tenantRepository = tenantRepository;
-        this.membershipRepository = membershipRepository;
-        this.supplierRepository = null;
+        this(orderRepository, tenantRepository, membershipRepository,
+                null, null);
     }
 
     private void authorize(Long tenantId, Long userId, boolean write) {
@@ -135,7 +146,11 @@ public class PurchaseOrderService {
 
     private void linkSupplier(PurchaseOrder order, PurchaseOrderRequest request) {
         if (supplierRepository == null) {
-            linkSupplier(order, request);
+            // Compatibility path for older tests/constructors without supplier lookup.
+            order.setSupplier(null);
+            order.setSupplierName(
+                request.supplierName() == null ? "" : request.supplierName().trim()
+            );
             return;
         }
 
@@ -172,8 +187,38 @@ public class PurchaseOrderService {
         );
     }
 
+    private void validateBranch(Long tenantId, Long branchId) {
+        // Branches currently use the tenant-scoped Store entity.
+        // Older unit-test constructors intentionally have no StoreRepository.
+        if (branchId == null) {
+            return;
+        }
+
+        if (branchId <= 0) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "A valid branch/store ID is required");
+        }
+
+        if (storeRepository == null) {
+            return;
+        }
+
+        var selectedStore = storeRepository.findByIdAndTenant_Id(branchId, tenantId)
+            .orElseThrow(() -> new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "Selected branch/store does not belong to this pharmacy"));
+
+        if (selectedStore.getStatus() == null
+                || !"Active".equalsIgnoreCase(selectedStore.getStatus().trim())) {
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "Selected branch/store is inactive");
+        }
+    }
+
     private void fillOrder(PurchaseOrder order, PurchaseOrderRequest request) {
         validateRequest(request);
+        validateBranch(order.getTenant().getId(), request.branchId());
         order.setSupplierName(request.supplierName().trim());
         order.setBranchId(request.branchId());
         order.setOrderDate(request.orderDate());

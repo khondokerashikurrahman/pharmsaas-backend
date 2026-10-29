@@ -16,6 +16,11 @@ public record SaleCreateRequest(
     public record SaleLineRequest(
         Long productId,
         Long batchId,
-        Integer quantity
-    ) {}
+        Integer quantity,
+        BigDecimal discountAmount
+    ) {
+        public SaleLineRequest(Long productId, Long batchId, Integer quantity) {
+            this(productId, batchId, quantity, BigDecimal.ZERO);
+        }
+    }
 }

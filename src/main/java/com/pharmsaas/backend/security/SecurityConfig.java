@@ -7,6 +7,7 @@ import java.util.List;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -191,7 +192,13 @@ public class SecurityConfig {
                                 "/api/tenants/*/dosage-forms/**"
                         ).authenticated()
 
-// Tenant administration: Super Admin only
+// Supplier Payments: authenticate here; service enforces tenant membership and roles
+                        .requestMatchers(
+                                "/api/tenants/*/supplier-payments",
+                                "/api/tenants/*/supplier-payments/**"
+                        ).authenticated()
+
+                        // Tenant administration: Super Admin only
                         .requestMatchers(
                                 "/api/tenants",
                                 "/api/tenants/**"
@@ -222,13 +229,12 @@ public class SecurityConfig {
     }
 
     @Bean
-    public CorsConfigurationSource corsConfigurationSource() {
+    public CorsConfigurationSource corsConfigurationSource(
+            @Value("${app.cors.allowed-origins:http://localhost:4200}") List<String> allowedOrigins) {
 
         CorsConfiguration configuration = new CorsConfiguration();
 
-        configuration.setAllowedOrigins(
-                List.of("http://localhost:4200")
-        );
+        configuration.setAllowedOrigins(allowedOrigins);
 
         configuration.setAllowedMethods(
                 List.of(

@@ -4,6 +4,7 @@ import com.pharmsaas.backend.modules.inventory.service.InventoryMovementService;
 
 import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryBatchRepository;
 import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryRepository;
+import com.pharmsaas.backend.modules.inventory.repository.StoreInventoryStockRepository;
 import com.pharmsaas.backend.modules.membership.entity.MembershipRole;
 import com.pharmsaas.backend.modules.membership.entity.TenantMembership;
 import com.pharmsaas.backend.modules.membership.repository.TenantMembershipRepository;
@@ -38,6 +39,7 @@ class SaleReturnServiceAuthorizationTest {
     private SaleReturnItemRepository returnItemRepository;
     private TenantInventoryBatchRepository batchRepository;
     private TenantInventoryRepository inventoryRepository;
+    private StoreInventoryStockRepository storeStockRepository;
     private TenantRepository tenantRepository;
     private TenantMembershipRepository membershipRepository;
     private InventoryMovementService movementService;
@@ -54,6 +56,7 @@ class SaleReturnServiceAuthorizationTest {
         returnItemRepository = mock(SaleReturnItemRepository.class);
         batchRepository = mock(TenantInventoryBatchRepository.class);
         inventoryRepository = mock(TenantInventoryRepository.class);
+        storeStockRepository = mock(StoreInventoryStockRepository.class);
         tenantRepository = mock(TenantRepository.class);
         membershipRepository = mock(TenantMembershipRepository.class);
         movementService = mock(InventoryMovementService.class);
@@ -68,6 +71,7 @@ class SaleReturnServiceAuthorizationTest {
             returnItemRepository,
             batchRepository,
             inventoryRepository,
+            storeStockRepository,
             tenantRepository,
             membershipRepository,
             movementService

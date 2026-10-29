@@ -1,8 +1,10 @@
 package com.pharmsaas.backend.modules.sale.service;
 
 import com.pharmsaas.backend.modules.inventory.entity.TenantInventoryBatch;
+import com.pharmsaas.backend.modules.inventory.entity.StoreInventoryStock;
 import com.pharmsaas.backend.modules.inventory.entity.TenantInventoryItem;
 import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryBatchRepository;
+import com.pharmsaas.backend.modules.inventory.repository.StoreInventoryStockRepository;
 import com.pharmsaas.backend.modules.inventory.repository.TenantInventoryRepository;
 import com.pharmsaas.backend.modules.inventory.service.InventoryMovementService;
 import com.pharmsaas.backend.modules.membership.repository.TenantMembershipRepository;
@@ -40,6 +42,7 @@ public class SaleReturnService {
     private final SaleReturnItemRepository returnItemRepository;
     private final TenantInventoryBatchRepository batchRepository;
     private final TenantInventoryRepository inventoryRepository;
+    private final StoreInventoryStockRepository storeStockRepository;
     private final TenantRepository tenantRepository;
     private final TenantMembershipRepository membershipRepository;
     private final InventoryMovementService movementService;
@@ -51,6 +54,7 @@ public class SaleReturnService {
         SaleReturnItemRepository returnItemRepository,
         TenantInventoryBatchRepository batchRepository,
         TenantInventoryRepository inventoryRepository,
+        StoreInventoryStockRepository storeStockRepository,
         TenantRepository tenantRepository,
         TenantMembershipRepository membershipRepository,
         InventoryMovementService movementService
@@ -61,6 +65,7 @@ public class SaleReturnService {
         this.returnItemRepository = returnItemRepository;
         this.batchRepository = batchRepository;
         this.inventoryRepository = inventoryRepository;
+        this.storeStockRepository = storeStockRepository;
         this.tenantRepository = tenantRepository;
         this.membershipRepository = membershipRepository;
         this.movementService = movementService;
@@ -338,11 +343,11 @@ public class SaleReturnService {
         Long batchId = returnItem.getBatch().getId();
         Long productId = returnItem.getSaleItem().getInventoryItem().getId();
 
-        TenantInventoryBatch batch = batchRepository.findForUpdate(batchId, tenantId)
-            .orElseThrow(() -> error(HttpStatus.NOT_FOUND, "Inventory batch not found"));
-
         TenantInventoryItem inventoryItem = inventoryRepository.findForUpdate(productId, tenantId)
             .orElseThrow(() -> error(HttpStatus.NOT_FOUND, "Inventory product not found"));
+
+        TenantInventoryBatch batch = batchRepository.findForUpdate(batchId, tenantId)
+            .orElseThrow(() -> error(HttpStatus.NOT_FOUND, "Inventory batch not found"));
 
         if (batch.getInventoryItem() == null
             || !batch.getInventoryItem().getId().equals(inventoryItem.getId())) {
@@ -364,6 +369,38 @@ public class SaleReturnService {
             throw error(HttpStatus.CONFLICT, "Returned quantity is invalid");
         }
 
+        var originalSale = returnItem.getSaleReturn().getSale();
+        var originalStore = originalSale.getStore();
+        if (originalStore == null) {
+            throw error(
+                HttpStatus.CONFLICT,
+                "The original sale has no store; returned stock cannot be released safely"
+            );
+        }
+
+        StoreInventoryStock storeStock = storeStockRepository
+            .findForUpdate(tenantId, originalStore.getId(), batchId)
+            .orElse(null);
+
+        if (storeStock == null) {
+            storeStock = new StoreInventoryStock();
+            storeStock.setTenant(tenant);
+            storeStock.setStore(originalStore);
+            storeStock.setInventoryItem(inventoryItem);
+            storeStock.setBatch(batch);
+            storeStock.setQuantity(0);
+        }
+
+        int currentStoreQuantity =
+            storeStock.getQuantity() == null ? 0 : storeStock.getQuantity();
+
+        int nextStoreQuantity;
+        try {
+            nextStoreQuantity = Math.addExact(currentStoreQuantity, quantity);
+        } catch (ArithmeticException ex) {
+            throw error(HttpStatus.CONFLICT, "Returned stock quantity exceeds the supported limit");
+        }
+
         batch.setQuantity((batch.getQuantity() == null ? 0 : batch.getQuantity()) + quantity);
         inventoryItem.setStockQuantity(
             (inventoryItem.getStockQuantity() == null ? 0 : inventoryItem.getStockQuantity()) + quantity
@@ -371,6 +408,8 @@ public class SaleReturnService {
 
         batchRepository.save(batch);
         inventoryRepository.save(inventoryItem);
+        storeStock.setQuantity(nextStoreQuantity);
+        storeStockRepository.save(storeStock);
 
         returnItem.setStockDisposition("RESTOCKED");
         returnItemRepository.save(returnItem);
@@ -382,12 +421,13 @@ public class SaleReturnService {
             batch,
             "RETURN_RESTOCKED",
             quantity,
-            batch.getQuantity(),
+            storeStock.getQuantity(),
             "SALE_RETURN",
             returnItem.getSaleReturn().getId(),
             returnItem.getSaleReturn().getRefundNumber(),
             returnItem.getSaleReturn().getReason(),
-            userId
+            userId,
+            originalStore
         );
 
         return toResponse(returnItem.getSaleReturn());
@@ -396,12 +436,27 @@ public class SaleReturnService {
     private Map<Long, BigDecimal> allocateNetLineAmounts(Sale sale, List<SaleItem> items) {
         Map<Long, BigDecimal> result = new LinkedHashMap<>();
 
-        BigDecimal subtotal = money(sale.getSubtotal());
         BigDecimal totalDiscount = money(sale.getDiscount());
         BigDecimal totalTax = money(sale.getTax());
-        BigDecimal taxableTotal = subtotal.subtract(totalDiscount);
 
-        BigDecimal allocatedDiscount = ZERO;
+        // SaleItem.subtotal already excludes the individual line discount.
+        // Only the remaining order-level discount should be allocated here.
+        BigDecimal itemDiscountTotal = items.stream()
+            .map(item -> money(item.getDiscountAmount()))
+            .reduce(ZERO, BigDecimal::add);
+
+        BigDecimal orderDiscount = totalDiscount.subtract(itemDiscountTotal);
+        if (orderDiscount.signum() < 0) {
+            orderDiscount = ZERO;
+        }
+
+        BigDecimal afterItemDiscounts = items.stream()
+            .map(item -> money(item.getSubtotal()))
+            .reduce(ZERO, BigDecimal::add);
+
+        BigDecimal taxableTotal = afterItemDiscounts.subtract(orderDiscount);
+
+        BigDecimal allocatedOrderDiscount = ZERO;
         BigDecimal allocatedTax = ZERO;
 
         for (int i = 0; i < items.size(); i++) {
@@ -409,18 +464,23 @@ public class SaleReturnService {
             BigDecimal lineSubtotal = money(item.getSubtotal());
             boolean last = i == items.size() - 1;
 
-            BigDecimal discountShare;
+            BigDecimal orderDiscountShare;
             if (last) {
-                discountShare = totalDiscount.subtract(allocatedDiscount);
-            } else if (subtotal.signum() > 0) {
-                discountShare = totalDiscount.multiply(lineSubtotal)
-                    .divide(subtotal, 2, RoundingMode.HALF_UP);
+                // Put rounding remainder on the last line so totals reconcile.
+                orderDiscountShare = orderDiscount.subtract(allocatedOrderDiscount);
+            } else if (afterItemDiscounts.signum() > 0) {
+                orderDiscountShare = orderDiscount.multiply(lineSubtotal)
+                    .divide(afterItemDiscounts, 2, RoundingMode.HALF_UP);
             } else {
-                discountShare = ZERO;
+                orderDiscountShare = ZERO;
             }
-            allocatedDiscount = allocatedDiscount.add(discountShare);
+            allocatedOrderDiscount = allocatedOrderDiscount.add(orderDiscountShare);
 
-            BigDecimal lineTaxable = lineSubtotal.subtract(discountShare);
+            BigDecimal lineTaxable = lineSubtotal.subtract(orderDiscountShare);
+            if (lineTaxable.signum() < 0) {
+                lineTaxable = ZERO;
+            }
+
             BigDecimal taxShare;
             if (last) {
                 taxShare = totalTax.subtract(allocatedTax);
@@ -432,7 +492,8 @@ public class SaleReturnService {
             }
             allocatedTax = allocatedTax.add(taxShare);
 
-            result.put(item.getId(), money(lineSubtotal.subtract(discountShare).add(taxShare)));
+            // Return amount is the line amount after both discounts, plus its tax share.
+            result.put(item.getId(), money(lineTaxable.add(taxShare)));
         }
 
         return result;
