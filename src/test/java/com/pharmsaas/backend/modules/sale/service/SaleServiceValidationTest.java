@@ -15,6 +15,7 @@ import com.pharmsaas.backend.modules.membership.repository.TenantMembershipRepos
 import com.pharmsaas.backend.modules.sale.dto.SaleCreateRequest;
 import com.pharmsaas.backend.modules.sale.repository.SaleItemRepository;
 import com.pharmsaas.backend.modules.sale.repository.SaleRepository;
+import com.pharmsaas.backend.modules.salesman.repository.SalesmanRepository;
 import com.pharmsaas.backend.modules.store.repository.StoreRepository;
 import com.pharmsaas.backend.modules.tenant.entity.Tenant;
 import com.pharmsaas.backend.modules.tenant.repository.TenantRepository;
@@ -40,6 +41,7 @@ class SaleServiceValidationTest {
     private static final Long STORE_ID = 30L;
 
     private SaleRepository saleRepository;
+    private SalesmanRepository salesmanRepository;
     private SaleItemRepository saleItemRepository;
     private TenantInventoryRepository inventoryRepository;
     private TenantInventoryBatchRepository batchRepository;
@@ -59,6 +61,7 @@ class SaleServiceValidationTest {
     @BeforeEach
     void setUp() {
         saleRepository = mock(SaleRepository.class);
+        salesmanRepository = mock(SalesmanRepository.class);
         saleItemRepository = mock(SaleItemRepository.class);
         inventoryRepository = mock(TenantInventoryRepository.class);
         batchRepository = mock(TenantInventoryBatchRepository.class);
@@ -70,6 +73,7 @@ class SaleServiceValidationTest {
 
         service = new SaleService(
             saleRepository,
+            salesmanRepository,
             saleItemRepository,
             inventoryRepository,
             batchRepository,
@@ -131,7 +135,8 @@ class SaleServiceValidationTest {
             new BigDecimal("1000.00"),
             List.of(new SaleCreateRequest.SaleLineRequest(
                 PRODUCT_ID, BATCH_ID, quantity
-            ))
+            )),
+            null
         );
     }
 

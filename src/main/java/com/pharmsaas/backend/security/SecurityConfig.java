@@ -86,6 +86,29 @@ public class SecurityConfig {
                                 HttpMethod.POST, "/api/public/registration"
                         ).permitAll()
 
+                        // Public subscription registration (payment preparation)
+                        .requestMatchers(
+                                HttpMethod.POST, "/api/public/subscription/registration",
+                                "/api/public/subscription/registration/**"
+                        ).permitAll()
+
+                        // Public subscription plan catalogue
+                        .requestMatchers(
+                                HttpMethod.GET, "/api/public/subscription-plans"
+                        ).permitAll()
+
+                        // Public SSLCommerz payment initiation and gateway callbacks
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/api/public/subscription/payments/**"
+                        ).permitAll()
+
+                        // Public payment status lookup by unguessable transaction reference
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/public/subscription/payments/*/status"
+                        ).permitAll()
+
                         // Create a platform-level Super Admin account
                         .requestMatchers(
                                 HttpMethod.POST, "/api/auth/platform-users"
@@ -148,6 +171,12 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/tenants/*/purchase-orders",
                                 "/api/tenants/*/purchase-orders/**"
+                        ).authenticated()
+
+                        // Tenant Salesman APIs: service validates tenant membership and role
+                        .requestMatchers(
+                                "/api/tenants/*/salesmen",
+                                "/api/tenants/*/salesmen/**"
                         ).authenticated()
 
                         // Tenant Sales: SaleService validates tenant membership and role

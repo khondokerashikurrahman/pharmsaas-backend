@@ -14,6 +14,8 @@ import com.pharmsaas.backend.modules.sale.entity.Sale;
 import com.pharmsaas.backend.modules.sale.entity.SaleItem;
 import com.pharmsaas.backend.modules.sale.repository.SaleItemRepository;
 import com.pharmsaas.backend.modules.sale.repository.SaleRepository;
+import com.pharmsaas.backend.modules.salesman.entity.Salesman;
+import com.pharmsaas.backend.modules.salesman.repository.SalesmanRepository;
 import com.pharmsaas.backend.modules.tenant.entity.Tenant;
 import com.pharmsaas.backend.modules.tenant.repository.TenantRepository;
 import com.pharmsaas.backend.modules.store.entity.Store;
@@ -40,6 +42,7 @@ public class SaleService {
     private static final BigDecimal HUNDRED = new BigDecimal("100");
 
     private final SaleRepository saleRepository;
+    private final SalesmanRepository salesmanRepository;
     private final SaleItemRepository saleItemRepository;
     private final TenantInventoryRepository inventoryRepository;
     private final TenantInventoryBatchRepository batchRepository;
@@ -51,6 +54,7 @@ public class SaleService {
 
     public SaleService(
         SaleRepository saleRepository,
+        SalesmanRepository salesmanRepository,
         SaleItemRepository saleItemRepository,
         TenantInventoryRepository inventoryRepository,
         TenantInventoryBatchRepository batchRepository,
@@ -61,6 +65,7 @@ public class SaleService {
         InventoryMovementService movementService
     ) {
         this.saleRepository = saleRepository;
+        this.salesmanRepository = salesmanRepository;
         this.saleItemRepository = saleItemRepository;
         this.inventoryRepository = inventoryRepository;
         this.batchRepository = batchRepository;
@@ -314,8 +319,35 @@ public class SaleService {
             changeAmount = ZERO;
         }
 
+        Salesman selectedSalesman = null;
+        if (request.salesmanId() != null) {
+            selectedSalesman = salesmanRepository
+                .findByIdAndTenant_Id(request.salesmanId(), tenantId)
+                .orElseThrow(() -> error(
+                    HttpStatus.NOT_FOUND,
+                    "Salesman not found in this tenant"
+                ));
+
+            if (selectedSalesman.getStatus() == null ||
+                !selectedSalesman.getStatus().equalsIgnoreCase("Active")) {
+                throw error(HttpStatus.BAD_REQUEST, "Selected salesman is not active");
+            }
+        }
+
         Sale sale = new Sale();
         sale.setTenant(tenant);
+        sale.setSalesman(selectedSalesman);
+
+        BigDecimal commissionRate = selectedSalesman == null
+            ? ZERO : money(selectedSalesman.getCommissionRate());
+        BigDecimal commissionBase = money(taxableAmount);
+        BigDecimal commissionAmount = commissionBase.multiply(commissionRate)
+            .divide(HUNDRED, 2, RoundingMode.HALF_UP);
+
+        sale.setCommissionRateSnapshot(commissionRate);
+        sale.setCommissionBaseAmount(commissionBase);
+        sale.setCommissionAmount(commissionAmount);
+
         sale.setCreatedBy(membership.getUser());
         sale.setStore(selectedStore);
         sale.setInvoiceNumber("INV-" + UUID.randomUUID()
@@ -443,6 +475,8 @@ public class SaleService {
             sale.getStore() != null ? sale.getStore().getId() : null,
             sale.getStore() != null ? sale.getStore().getName() : null,
             sale.getStore() != null ? sale.getStore().getStoreCode() : null,
+            sale.getSalesman() != null ? sale.getSalesman().getId() : null,
+            sale.getSalesman() != null ? sale.getSalesman().getName() : null,
             lines
         );
     }

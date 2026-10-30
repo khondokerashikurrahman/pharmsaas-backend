@@ -2,9 +2,6 @@ package com.pharmsaas.backend.modules.sale.controller;
 
 import com.pharmsaas.backend.modules.sale.dto.SaleCreateRequest;
 import com.pharmsaas.backend.modules.sale.dto.SaleResponse;
-import com.pharmsaas.backend.modules.sale.dto.SaleReturnCreateRequest;
-import com.pharmsaas.backend.modules.sale.dto.SaleReturnResponse;
-import com.pharmsaas.backend.modules.sale.service.SaleReturnService;
 import com.pharmsaas.backend.modules.sale.service.SaleService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -18,14 +15,9 @@ import java.util.List;
 public class SaleController {
 
     private final SaleService saleService;
-    private final SaleReturnService saleReturnService;
 
-    public SaleController(
-        SaleService saleService,
-        SaleReturnService saleReturnService
-    ) {
+    public SaleController(SaleService saleService) {
         this.saleService = saleService;
-        this.saleReturnService = saleReturnService;
     }
 
     @PostMapping
@@ -44,39 +36,6 @@ public class SaleController {
         Authentication authentication
     ) {
         return saleService.list(tenantId, currentUserId(authentication));
-    }
-
-    @PostMapping("/{saleId}/returns")
-    @ResponseStatus(HttpStatus.CREATED)
-    public SaleReturnResponse returnSale(
-        @PathVariable Long tenantId,
-        @PathVariable Long saleId,
-        @RequestBody SaleReturnCreateRequest request,
-        Authentication authentication
-    ) {
-        return saleReturnService.create(
-            tenantId, saleId, currentUserId(authentication), request
-        );
-    }
-
-    @GetMapping("/returns")
-    public List<SaleReturnResponse> listReturns(
-        @PathVariable Long tenantId,
-        Authentication authentication
-    ) {
-        return saleReturnService.listReturns(tenantId, currentUserId(authentication));
-    }
-
-    @PostMapping("/returns/{returnId}/items/{returnItemId}/restock")
-    public SaleReturnResponse restockReturnedItem(
-        @PathVariable Long tenantId,
-        @PathVariable Long returnId,
-        @PathVariable Long returnItemId,
-        Authentication authentication
-    ) {
-        return saleReturnService.restockReturnedItem(
-            tenantId, returnId, returnItemId, currentUserId(authentication)
-        );
     }
 
     private Long currentUserId(Authentication authentication) {

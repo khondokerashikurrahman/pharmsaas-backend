@@ -24,6 +24,8 @@ public record SaleResponse(
     Long storeId,
     String storeName,
     String storeCode,
+    Long salesmanId,
+    String salesmanName,
     List<Item> items
 ) {
     public record Item(

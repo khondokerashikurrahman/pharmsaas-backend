@@ -8,6 +8,7 @@ import com.pharmsaas.backend.modules.tenant.service.PublicTenantRegistrationServ
 import jakarta.validation.Valid;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -26,7 +27,10 @@ public class PublicTenantRegistrationController {
     public PublicTenantRegistrationResponse register(
             @Valid @RequestBody PublicTenantRegistrationRequest request) {
 
-        return registrationService.register(request);
+        throw new ResponseStatusException(
+                HttpStatus.GONE,
+                "Direct registration is no longer available. Use the subscription registration process."
+        );
     }
 }
 

@@ -11,7 +11,8 @@ public record SaleCreateRequest(
     BigDecimal discountValue,
     BigDecimal taxRate,
     BigDecimal amountReceived,
-    List<SaleLineRequest> items
+    List<SaleLineRequest> items,
+    Long salesmanId
 ) {
     public record SaleLineRequest(
         Long productId,
