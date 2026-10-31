@@ -50,13 +50,32 @@ public class PendingRegistrationService {
             );
         }
 
+        PendingRegistration existingPending = pendingRepository
+                .findFirstByEmailAndStatusAndExpiresAtAfter(
+                        email, "PENDING_EMAIL_VERIFICATION", now)
+                .orElse(null);
+
+        if (existingPending != null) {
+            SubscriptionPlan existingPlan = existingPending.getPlan();
+            return new PendingRegistrationResponse(
+                    existingPending.getRegistrationReference(),
+                    existingPending.getPharmacyName(),
+                    existingPlan.getCode(),
+                    existingPlan.getName(),
+                    existingPlan.getPrice(),
+                    existingPlan.getCurrency(),
+                    existingPlan.getDurationDays(),
+                    existingPending.getStatus(),
+                    existingPending.getExpiresAt(),
+                    "An existing registration was found. Continue email verification using the existing registration."
+            );
+        }
+
         if (pendingRepository.existsByEmailAndStatusAndExpiresAtAfter(
-                email, "PENDING_EMAIL_VERIFICATION", now)
-                || pendingRepository.existsByEmailAndStatusAndExpiresAtAfter(
                 email, "PENDING_PAYMENT", now)) {
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT,
-                    "An active registration already exists for this email."
+                    "This email already has a verified registration awaiting payment. Please continue that registration."
             );
         }
 

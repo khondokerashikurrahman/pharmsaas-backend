@@ -28,4 +28,10 @@ public interface PendingRegistrationRepository
             String status,
             OffsetDateTime now
     );
+
+    Optional<PendingRegistration> findFirstByEmailAndStatusAndExpiresAtAfter(
+            String email,
+            String status,
+            OffsetDateTime now
+    );
 }

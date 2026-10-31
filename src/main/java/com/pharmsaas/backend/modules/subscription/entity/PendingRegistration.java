@@ -53,6 +53,9 @@ public class PendingRegistration extends BaseEntity {
     @Column(name = "completed_at")
     private OffsetDateTime completedAt;
 
+    @Column(name = "welcome_email_sent_at")
+    private OffsetDateTime welcomeEmailSentAt;
+
     @Column(name = "email_verified", nullable = false)
     private boolean emailVerified = false;
 

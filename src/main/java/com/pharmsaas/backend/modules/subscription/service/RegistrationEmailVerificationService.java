@@ -56,6 +56,7 @@ public class RegistrationEmailVerificationService {
         OffsetDateTime now = OffsetDateTime.now();
 
         if (registration.isEmailVerified()) {
+            sendWelcomeEmailIfNeeded(registration);
             return new EmailVerificationResponse(
                     true, true, registration.getStatus(),
                     "Email is already verified."
@@ -66,6 +67,13 @@ public class RegistrationEmailVerificationService {
                 || !registration.getExpiresAt().isAfter(now)) {
             throw new ResponseStatusException(
                     HttpStatus.GONE, "Registration has expired or is no longer awaiting email verification."
+            );
+        }
+
+        if (registration.getEmailVerificationSendCount() >= MAX_OTP_SENDS) {
+            throw new ResponseStatusException(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    "Maximum verification emails reached. Please try again later."
             );
         }
 
@@ -107,9 +115,12 @@ public class RegistrationEmailVerificationService {
         OffsetDateTime now = OffsetDateTime.now();
 
         if (registration.isEmailVerified()) {
+            sendWelcomeEmailIfNeeded(registration);
             return new EmailVerificationResponse(
                     true, true, registration.getStatus(),
-                    "Email is already verified."
+                    registration.getWelcomeEmailSentAt() != null
+                            ? "Email is already verified. Welcome email has been sent."
+                            : "Email is already verified. Welcome email could not be sent yet; it will be retried."
             );
         }
 
@@ -166,11 +177,54 @@ public class RegistrationEmailVerificationService {
         registration.setEmailVerificationExpiresAt(null);
         registration.setEmailVerificationAttempts(0);
         repository.save(registration);
+        sendWelcomeEmailIfNeeded(registration);
 
         return new EmailVerificationResponse(
                 true, true, registration.getStatus(),
                 "Email verified successfully. You may now proceed to payment."
         );
+    }
+
+
+    private void sendWelcomeEmailIfNeeded(PendingRegistration registration) {
+        if (registration.getWelcomeEmailSentAt() != null) {
+            return;
+        }
+
+        try {
+            ensureBrevoConfigured();
+
+            String html = """
+                    <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;color:#172033">
+                      <h2>Welcome to PharmSaaS!</h2>
+                      <p>Hello %s,</p>
+                      <p>Your email has been successfully verified.</p>
+                      <p>Your pharmacy registration is now ready for the subscription payment step.</p>
+                      <p>Thank you for choosing PharmSaaS.</p>
+                      <p>PharmSaaS Team</p>
+                    </div>
+                    """.formatted(escapeHtml(registration.getOwnerName()));
+
+            Map<String, Object> body = Map.of(
+                    "sender", Map.of("name", senderName, "email", senderEmail),
+                    "to", List.of(Map.of("email", registration.getEmail())),
+                    "subject", "Welcome to PharmSaaS",
+                    "htmlContent", html
+            );
+
+            restClient.post()
+                    .uri("https://api.brevo.com/v3/smtp/email")
+                    .header("api-key", apiKey)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve()
+                    .toBodilessEntity();
+
+            registration.setWelcomeEmailSentAt(OffsetDateTime.now());
+            repository.save(registration);
+        } catch (Exception ignored) {
+            // Verification remains successful; a later verification request can retry the welcome email.
+        }
     }
 
     private PendingRegistration getRegistration(String reference) {
